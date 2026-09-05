@@ -234,6 +234,21 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertEqual(newest.start_line, 1)
         self.assertEqual(older.start_line, 0)
 
+    def test_native_highlight_drops_the_context_before_zs(self):
+        pattern = self.mod.native_highlight_pattern(r"^tmux-\zspane-regex")
+
+        self.assertEqual(pattern, "pane-regex")
+
+    def test_native_highlight_drops_the_context_after_ze(self):
+        pattern = self.mod.native_highlight_pattern(r"^comma.*\ze:")
+
+        self.assertEqual(pattern, "comma.*")
+
+    def test_native_highlight_carries_the_line_tail_shorthand(self):
+        pattern = self.mod.native_highlight_pattern(r"^fix/\zsunlim$$")
+
+        self.assertEqual(pattern, "(unlim.*[^[:space:]]|unlim)")
+
     def test_native_start_pattern_follows_the_selection_marker(self):
         pattern = self.mod.native_selection_start_pattern(r"^fix/\zsunlim")
 
