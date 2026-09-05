@@ -441,6 +441,28 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.text, "    indented value")
 
+    def test_agent_gutter_glyphs_stay_out_of_the_paste(self):
+        text = "● Bash(git status)\n  ⎿  On branch main\n"
+
+        self.assertEqual(
+            self.mod.find_latest_match(text, r"^Bash\l").text, "Bash(git status)"
+        )
+        self.assertEqual(
+            self.mod.find_latest_match(text, r"^On branch\l").text, "On branch main"
+        )
+
+    def test_committed_line_form_reports_a_repeated_line_once(self):
+        text = "beta once\n\nbeta then beta again\n"
+
+        committed = self.mod.find_matches_latest(text, r"^beta$")
+        typing = self.mod.find_matches_latest(text, r"^beta")
+
+        self.assertEqual(
+            [match.text for match in committed],
+            ["beta then beta again", "beta once"],
+        )
+        self.assertEqual(len(typing), 3)
+
     def test_picker_bullets_stay_out_of_the_paste(self):
         text = "  • fix/first-branch\n  › fix/second-branch\n"
 

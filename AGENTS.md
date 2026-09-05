@@ -42,7 +42,8 @@ it. Keep the interaction fast, local, and safe for shells and agent prompts.
 - Paste what the selection shows. Every line after the first sits inside the
   highlighted range whole, so it keeps its indent. The first line keeps its own
   indent only in the whole-line forms, which start the selection at column 0.
-  Picker bullets are chrome, so a bulleted line's leading space stays off.
+  Picker bullets and agent gutter glyphs are chrome, so their line's leading
+  space stays off.
 
 The documented selector forms are public behavior:
 
@@ -53,7 +54,9 @@ The documented selector forms are public behavior:
 - `^start\ss` stops after the first sentence-ending `.`, `?`, or `!`.
 - A final `\$` matches a literal dollar sign.
 - `^word\l` selects the logical line holding the locator, `^word\p` the
-  paragraph between the blank lines around it, deduplicated per block.
+  paragraph between the blank lines around it, deduplicated per block. The
+  committed `^word$` line form is deduplicated the same way, while the
+  unfinished `^word` keeps one stop per hit so arrows can walk them.
   Both accept either case.
 - `\zs` and `\ze` mark where the selection starts and ends. Text outside them
   must match and stays out of the selection. They translate to one named group,

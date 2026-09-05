@@ -74,7 +74,7 @@ def selection_span(found: re.Match[str]) -> tuple[int, int]:
     return found.start(), found.end()
 
 
-MARGIN = re.compile(r"^([^\S\n]*)([•›][^\S\n]+)?")
+MARGIN = re.compile(r"^([^\S\n]*)([•›●⏺⎿][^\S\n]+)?")
 PRIVATE_USE = re.compile(r"[\ue000-\uf8ff\U000f0000-\U000ffffd\U00100000-\U0010fffd] ?")
 
 
@@ -407,9 +407,15 @@ def clean_matches_latest(clean: str, pattern: str) -> list[Match]:
         )
         lines = clean.splitlines()
         offsets = line_start_offsets(lines)
+        # The committed form selects the whole line, so two hits on one line
+        # would be the same selection twice and an arrow press that looks dead.
+        # The unfinished form highlights the hit, where both are worth visiting.
+        per_line = has_terminal_anchor(pattern)
         matches = []
         for index in range(len(lines) - 1, -1, -1):
             occurrences = list(compiled_prefix.finditer(lines[index]))
+            if per_line:
+                occurrences = occurrences[:1]
             for found in reversed(occurrences):
                 start = offsets[index] + found.start()
                 matches.append(

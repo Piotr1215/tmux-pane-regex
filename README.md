@@ -59,7 +59,8 @@ A straight apostrophe also matches a smart apostrophe.
 
 A paste carries the indentation you can see selected, so an indented YAML block
 keeps its shape. Leading whitespace before the selection start is not part of
-the range, and a picker bullet such as `•` or `›` never is.
+the range, and terminal chrome never is: picker bullets such as `•` and `›`,
+and the `●` and `⎿` gutter an agent CLI draws down the left of its own output.
 
 `\l` and `\p` name what they take, so `^word\l` reads the same as `^word$` and
 `^word\p` runs from the blank line above the locator to the blank line below it.

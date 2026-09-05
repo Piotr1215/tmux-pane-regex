@@ -55,6 +55,10 @@ class TmuxNavigationTests(unittest.TestCase):
             "print('  replicas: 3')\n"
             "print('    nested: true')\n"
             "print('')\n"
+            "print('beta once')\n"
+            "print('')\n"
+            "print('beta then beta again')\n"
+            "print('')\n"
             "input('DEST> ')\n"
         )
         self.pane = self.tmux(
@@ -169,6 +173,27 @@ class TmuxNavigationTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.text, "  replicas: 3")
         self.assertEqual(self.selected_text(), match.text)
+
+    def test_repeated_locator_on_one_line_matches_the_native_selection(self):
+        # tmux walks every hit on a line while Python reports the line once,
+        # so a line holding the locator twice is where the two drift apart.
+        for query in (r"^beta$", r"^beta\l", r"^beta$$", r"^beta\p"):
+            with self.subTest(query=query):
+                match = self.mod.update(self.pane, str(self.state), query)
+
+                self.assertIsNotNone(match)
+                self.assertEqual(match.text, "beta then beta again")
+                self.assertEqual(self.selected_text(), match.text)
+
+                self.mod.move_selection(self.pane, str(self.state), "older", query)
+                older = self.mod.read_match(self.state, query)
+                self.assertEqual(older.text, "beta once")
+                self.assertEqual(self.selected_text(), older.text)
+
+                self.mod.move_selection(self.pane, str(self.state), "newer", query)
+                newer = self.mod.read_match(self.state, query)
+                self.assertEqual(newer.text, "beta then beta again")
+                self.assertEqual(self.selected_text(), newer.text)
 
     def test_initial_query_can_find_a_match_beyond_ten_thousand_lines(self):
         query = "^needle oldest$$"
