@@ -8,7 +8,7 @@ search and copy-mode styles, including soft-wrapped and multiline text.
 
 ## Requirements
 
-- tmux
+- tmux 3.7b or newer
 - Python 3.10 or newer
 - fzf
 

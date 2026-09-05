@@ -46,6 +46,7 @@ class TmuxNavigationTests(unittest.TestCase):
             "print('Wrapped ' + 'word ' * 30 + 'tail.')\n"
             "print('tokenVALUE tail')\n"
             "print('token other')\n"
+            "print('-option selected -tail')\n"
             "input('DEST> ')\n"
         )
         self.pane = self.tmux(
@@ -186,6 +187,12 @@ class TmuxNavigationTests(unittest.TestCase):
         match = self.mod.update(self.pane, str(self.state), r"^TOKEN\S+$$")
 
         self.assertEqual(match.text, "tokenVALUE tail")
+        self.assertEqual(self.selected_text(), match.text)
+
+    def test_leading_dashes_are_search_text_in_both_locators(self):
+        match = self.mod.update(self.pane, str(self.state), "^-option$$")
+
+        self.assertEqual(match.text, "-option selected -tail")
         self.assertEqual(self.selected_text(), match.text)
 
     @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
