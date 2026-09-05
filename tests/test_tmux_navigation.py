@@ -223,6 +223,44 @@ class TmuxNavigationTests(unittest.TestCase):
             time.sleep(0.02)
         self.fail("accepted text did not reach the destination prompt")
 
+    @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
+    def test_escape_removes_inline_trigger_and_keeps_the_existing_prompt(self):
+        self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+        self.tmux("send-keys", "-l", "-t", self.pane, "keep this ;;^python")
+        command = shlex.join(
+            [
+                sys.executable,
+                str(self.mod.SCRIPT),
+                "--prompt",
+                self.pane,
+                str(self.state),
+                "3",
+            ]
+        )
+        self.tmux(
+            "run-shell",
+            "-b",
+            shlex.join(
+                [
+                    "tmux",
+                    "display-popup",
+                    "-E",
+                    "-h",
+                    "7",
+                    command,
+                ]
+            ),
+        )
+        self.assertTrue(self.popup_ready.wait(timeout=5), "popup did not render")
+        os.write(self.master, b"more query text\x1b")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            captured = self.tmux("capture-pane", "-p", "-t", self.pane).stdout
+            if "DEST> keep this" in captured.splitlines():
+                return
+            time.sleep(0.02)
+        self.fail("Esc did not restore the original destination prompt")
+
     def wait_for_match(self, text):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:

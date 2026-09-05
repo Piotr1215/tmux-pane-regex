@@ -61,7 +61,8 @@ selects just the word. Uppercase letters alone do not change the default.
 - Down selects a newer occurrence.
 - Enter or Tab pastes the current selection.
 - Space accepts when the query ends in an unescaped `$`.
-- Esc closes the picker without pasting.
+- Esc closes the picker without pasting and removes the inline `;;^` trigger,
+  including any query text typed into the source prompt before the popup opened.
 
 Navigation has no match-count limit and searches all history retained by tmux.
 The tmux `history-limit` setting still controls how much scrollback exists.

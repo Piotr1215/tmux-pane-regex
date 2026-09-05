@@ -451,12 +451,47 @@ class PaneRegexPluginTests(unittest.TestCase):
                 mock.patch.object(self.mod, "recover_inline_query") as recover,
                 mock.patch.object(self.mod.subprocess, "Popen", return_value=watcher),
                 mock.patch.object(self.mod, "run", return_value=completed),
-                mock.patch.object(self.mod, "tmux"),
+                mock.patch.object(self.mod, "tmux") as tmux,
             ):
                 self.mod.prompt("%7", name, 0)
 
             recover.assert_not_called()
             self.assertEqual((state / "query").read_text(), "^")
+            self.assertFalse(any("BSpace" in call.args for call in tmux.call_args_list))
+
+    def test_cancel_erases_only_the_trigger_and_recovered_inline_query(self):
+        for initial_query in ("^", "^python$$"):
+            with (
+                self.subTest(initial_query=initial_query),
+                tempfile.TemporaryDirectory(prefix="pane-regex-expand-test-") as name,
+                mock.patch.object(
+                    self.mod, "recover_inline_query", return_value=initial_query
+                ),
+                mock.patch.object(self.mod.subprocess, "Popen"),
+                mock.patch.object(
+                    self.mod,
+                    "run",
+                    return_value=self.mod.subprocess.CompletedProcess(
+                        [], 130, stdout=""
+                    ),
+                ),
+                mock.patch.object(self.mod, "tmux") as tmux,
+            ):
+                self.mod.prompt("%7", name, 3)
+
+            tmux.assert_has_calls(
+                [
+                    mock.call("send-keys", "-X", "-t", "%7", "cancel", check=False),
+                    mock.call(
+                        "send-keys",
+                        "-t",
+                        "%7",
+                        "-N",
+                        str(len(";;" + initial_query)),
+                        "BSpace",
+                    ),
+                ]
+            )
 
     def test_explicit_pane_must_be_a_tmux_pane_id(self):
         with self.assertRaisesRegex(ValueError, "invalid tmux pane"):

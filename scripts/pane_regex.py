@@ -798,6 +798,15 @@ def cancel(pane: str) -> None:
     tmux("send-keys", "-X", "-t", pane, "cancel", check=False)
 
 
+def erase_inline_trigger(pane: str, state: Path) -> None:
+    try:
+        erase = int((state / "inline-length").read_text())
+    except (FileNotFoundError, ValueError):
+        erase = 0
+    if erase > 0:
+        tmux("send-keys", "-t", pane, "-N", str(erase), "BSpace")
+
+
 def accept(pane: str, state: Path, query: str) -> None:
     match = read_match(state, query)
     if match is None:
@@ -806,13 +815,7 @@ def accept(pane: str, state: Path, query: str) -> None:
     match_file = state / "match.txt"
     match_file.write_text(match.text)
     cancel(pane)
-
-    try:
-        erase = int((state / "inline-length").read_text())
-    except (FileNotFoundError, ValueError):
-        erase = 0
-    if erase:
-        tmux("send-keys", "-t", pane, "-N", str(erase), "BSpace")
+    erase_inline_trigger(pane, state)
     run(["bash", str(DELIVER), "--file", pane, str(match_file)])
 
 
@@ -899,6 +902,7 @@ def prompt(pane: str, state_name: str, trigger_length: int) -> int:
             watcher.wait(timeout=1)
     if result.returncode != 0:
         cancel(pane)
+        erase_inline_trigger(pane, state)
         return 0
     query = result.stdout.splitlines()[0] if result.stdout else ""
     accept(pane, state, query)
