@@ -30,12 +30,19 @@ it. Keep the interaction fast, local, and safe for shells and agent prompts.
   selection must show that same range. Never add a second synthetic highlighter.
 - The native tmux search follows the selection start, so a `\zs` query highlights
   the selected text and not its context.
+- The committed `^word$` line form draws a whole-line copy selection, while an
+  unfinished `^word` keeps the search highlight so typing does not flash a line. Every form that
+  selects gives up tmux's search state, so no form shows the other matches.
 - Up selects an older occurrence. Down selects a newer one. Query refinement
   keeps the selected source position instead of resetting to the newest match.
 - Soft-wrapped text stays logical text. Multiline ranges start at the newest
   viable start locator and resolve downward through the first viable end.
-- Strip terminal UI margins, trailing display padding, and private-use prompt
-  glyphs before matches are pasted.
+- Match against text with terminal UI margins, trailing display padding, and
+  private-use prompt glyphs removed, so a locator never spells out indentation.
+- Paste what the selection shows. Every line after the first sits inside the
+  highlighted range whole, so it keeps its indent. The first line keeps its own
+  indent only in the whole-line forms, which start the selection at column 0.
+  Picker bullets are chrome, so a bulleted line's leading space stays off.
 
 The documented selector forms are public behavior:
 
@@ -45,6 +52,9 @@ The documented selector forms are public behavior:
 - `^start.*end$$` includes the rest of the ending logical line.
 - `^start\ss` stops after the first sentence-ending `.`, `?`, or `!`.
 - A final `\$` matches a literal dollar sign.
+- `^word\l` selects the logical line holding the locator, `^word\p` the
+  paragraph between the blank lines around it, deduplicated per block.
+  Both accept either case.
 - `\zs` and `\ze` mark where the selection starts and ends. Text outside them
   must match and stays out of the selection. They translate to one named group,
   never to a lookaround, so the context carries no fixed-width limit.

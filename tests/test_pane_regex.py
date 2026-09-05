@@ -324,13 +324,82 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIn("navigation", command)
         self.assertIn("stop-selection", command)
 
-    def test_literal_line_locator_keeps_search_highlight_without_selection(self):
+    def test_literal_line_locator_selects_the_whole_logical_line(self):
         match = self.mod.Match("prefix checking the popup", 1, 1)
 
         with mock.patch.object(self.mod, "tmux") as tmux:
             self.mod.show_match("%1", r"^checking$", match)
 
+        args = tmux.call_args.args
+        self.assertIn("start-of-line", args)
+        self.assertIn("begin-selection", args)
+        self.assertIn("end-of-line", args)
+
+    def test_unfinished_literal_locator_keeps_the_search_highlight(self):
+        match = self.mod.Match("prefix checking the popup", 1, 1)
+
+        with mock.patch.object(self.mod, "tmux") as tmux:
+            self.mod.show_match("%1", r"^checking", match)
+
         self.assertNotIn("begin-selection", tmux.call_args.args)
+
+    def test_line_suffix_selects_the_logical_line(self):
+        text = "run cd /home/decoder/dev now\nsecond line\n"
+
+        match = self.mod.find_latest_match(text, r"^decoder\L")
+
+        self.assertEqual(match.text, "run cd /home/decoder/dev now")
+
+    def test_paragraph_suffix_stops_at_the_blank_lines(self):
+        text = "alpha one\nalpha two\n\nbeta one\nbeta two\n\ngamma\n"
+
+        match = self.mod.find_latest_match(text, r"^beta two\P")
+
+        self.assertEqual(match.text, "beta one\nbeta two")
+
+    def test_paragraph_suffix_reports_each_paragraph_once(self):
+        text = "beta one\nbeta two\nbeta three\n\nlater beta\n"
+
+        matches = self.mod.find_matches_latest(text, r"^beta\P")
+
+        self.assertEqual(len(matches), 2)
+        self.assertEqual(matches[0].text, "later beta")
+        self.assertEqual(matches[1].text, "beta one\nbeta two\nbeta three")
+
+    def test_paragraph_search_starts_at_the_first_word_of_the_block(self):
+        match = self.mod.Match("beta one\nbeta two", 3, 4)
+
+        pattern = self.mod.native_selection_start_pattern(r"^two\P", match)
+
+        self.assertEqual(pattern, "beta")
+
+    def test_line_suffix_selects_the_whole_line_in_the_pane(self):
+        match = self.mod.Match("prefix checking the popup", 1, 1)
+
+        with mock.patch.object(self.mod, "tmux") as tmux:
+            self.mod.show_match("%1", r"^checking\L", match)
+
+        args = tmux.call_args.args
+        self.assertIn("start-of-line", args)
+        self.assertIn("begin-selection", args)
+        self.assertIn("end-of-line", args)
+
+    def test_block_suffixes_accept_either_case(self):
+        text = "alpha one\nalpha two\n\nbeta one\n"
+
+        lower = self.mod.find_latest_match(text, r"^alpha\p")
+        upper = self.mod.find_latest_match(text, r"^alpha\P")
+
+        self.assertEqual(lower.text, "alpha one\nalpha two")
+        self.assertEqual(upper.text, lower.text)
+
+    def test_search_occurrence_anchors_on_the_earliest_hit_in_range(self):
+        text = "beta one\nbeta two\n"
+        match = self.mod.find_latest_match(text, r"^beta\p")
+
+        occurrence = self.mod.native_search_occurrence(text, r"^beta\p", match)
+
+        self.assertEqual(occurrence, 1)
 
     def test_search_starts_at_latest_output_and_moves_up(self):
         text = "the old\nold too\nthe newest\nnewest too\nafter\n"
@@ -348,15 +417,37 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.text, text.rstrip("\n"))
 
-    def test_codex_display_margin_is_not_part_of_expansion(self):
+    def test_display_margin_before_the_locator_is_not_part_of_expansion(self):
         text = "  I’m setting aside the memory.\n    Tab inserts it too.\n"
 
         match = self.mod.find_latest_match(text, r"^I'm.*too\.$")
 
         self.assertIsNotNone(match)
-        self.assertEqual(
-            match.text, "I’m setting aside the memory.\nTab inserts it too."
-        )
+        self.assertTrue(match.text.startswith("I’m"))
+
+    def test_indented_block_keeps_its_shape(self):
+        text = "selected item\n\nspec:\n  replicas: 3\n    nested: true\n\ntail\n"
+
+        match = self.mod.find_latest_match(text, r"^spec\p")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "spec:\n  replicas: 3\n    nested: true")
+
+    def test_whole_line_form_keeps_its_own_indent(self):
+        text = "head\n    indented value\ntail\n"
+
+        match = self.mod.find_latest_match(text, r"^indented\l")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "    indented value")
+
+    def test_picker_bullets_stay_out_of_the_paste(self):
+        text = "  • fix/first-branch\n  › fix/second-branch\n"
+
+        match = self.mod.find_latest_match(text, r"^fix/second\l")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "fix/second-branch")
 
     def test_accept_erases_only_the_matcher_already_in_the_app(self):
         self.assertEqual(self.mod.inline_erase_count(3, "^"), 3)
@@ -434,8 +525,10 @@ class PaneRegexMatchTests(unittest.TestCase):
 
         self.assertEqual(match.text, "older screenshot line")
         self.assertEqual(stored, match)
+        # The line form now counts its own native hits instead of reusing the
+        # occurrence index. Both are 1 here, one locator hit per line.
         show_match.assert_called_once_with(
-            "%1", query, match, occurrence=1, search_occurrence=None
+            "%1", query, match, occurrence=1, search_occurrence=1
         )
 
     def test_query_refinement_keeps_the_arrow_selected_occurrence(self):

@@ -49,11 +49,22 @@ output:
 | `^start\ss` | Through the first `.`, `?`, or `!` |
 | `^start\zsword` | Selects from `word`, with `start` matched as context |
 | `^word\zeend` | Selects `word`, with `end` matched but left out |
+| `^word\l` | The whole logical line holding `word`, vim `V` |
+| `^word\p` | The whole paragraph holding `word`, vim `vip` |
 | `^price\$` | A literal final dollar sign |
 
 The first `.*` in a landmark range stops at the first viable ending locator.
 Matches are case-insensitive and preserve the original text when pasted.
 A straight apostrophe also matches a smart apostrophe.
+
+A paste carries the indentation you can see selected, so an indented YAML block
+keeps its shape. Leading whitespace before the selection start is not part of
+the range, and a picker bullet such as `•` or `›` never is.
+
+`\l` and `\p` name what they take, so `^word\l` reads the same as `^word$` and
+`^word\p` runs from the blank line above the locator to the blank line below it.
+A paragraph is reported once however many of its lines hold the locator.
+Either case works, `\L` and `\P` read the same as the lowercase pair.
 
 `\zs` and `\ze` move the selection boundaries the way they do in vim. The text
 outside them still has to match, it is just not selected. The context before

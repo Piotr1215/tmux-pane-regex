@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve()
@@ -24,6 +24,8 @@ SENTENCE_SUFFIX = r"\ss"
 SELECTION_START = r"\zs"
 SELECTION_END = r"\ze"
 SELECTION_GROUP = "sel"
+LINE_SUFFIX = r"\L"
+PARAGRAPH_SUFFIX = r"\P"
 
 
 @dataclass(frozen=True)
@@ -72,14 +74,51 @@ def selection_span(found: re.Match[str]) -> tuple[int, int]:
     return found.start(), found.end()
 
 
+MARGIN = re.compile(r"^([^\S\n]*)([•›][^\S\n]+)?")
+PRIVATE_USE = re.compile(r"[\ue000-\uf8ff\U000f0000-\U000ffffd\U00100000-\U0010fffd] ?")
+
+
+def scrollback_lines(text: str) -> tuple[list[str], list[str]]:
+    """Split scrollback into match-ready lines and the indent each one lost.
+
+    Matching runs without terminal UI margins so a locator never has to spell
+    out indentation. Keeping each indent lets a pasted block carry the shape it
+    had on screen. A bulleted line is picker chrome rather than structure, so
+    its leading space is dropped for good.
+    """
+    lines: list[str] = []
+    indents: list[str] = []
+    for line in text.splitlines():
+        margin = MARGIN.match(line)
+        indents.append("" if margin.group(2) else margin.group(1))
+        lines.append(PRIVATE_USE.sub("", line[margin.end() :]).rstrip())
+    return lines, indents
+
+
 def clean_scrollback(text: str) -> str:
     """Remove terminal UI margins while retaining hard line boundaries."""
-    margin = re.compile(r"^\s*(?:[•›]\s+)?")
-    private_use = re.compile(
-        r"[\ue000-\uf8ff\U000f0000-\U000ffffd\U00100000-\U0010fffd] ?"
-    )
-    return "\n".join(
-        private_use.sub("", margin.sub("", line)).rstrip() for line in text.splitlines()
+    return "\n".join(scrollback_lines(text)[0])
+
+
+def restore_indent(match: Match, indents: list[str], whole_line: bool) -> Match:
+    """Give a match back the indentation it is shown selected with.
+
+    Every line after the first sits inside the highlighted range whole, so its
+    indent belongs to the paste. The first line only keeps its own indent when
+    the selection is drawn from the start of the line.
+    """
+    if match.end_line >= len(indents):
+        return match
+    covered = list(indents[match.start_line : match.end_line + 1])
+    if not whole_line:
+        covered[0] = ""
+    if not any(covered):
+        return match
+    parts = match.text.split("\n")
+    if len(parts) != len(covered):
+        return match
+    return replace(
+        match, text="\n".join(indent + part for indent, part in zip(covered, parts))
     )
 
 
@@ -147,6 +186,46 @@ def line_tail_shorthand(pattern: str) -> str | None:
 
 def line_tail_start_pattern(pattern: str) -> str | None:
     return line_tail_shorthand(pattern) or open_ended_line_pattern(pattern)
+
+
+def block_start_pattern(pattern: str, suffix: str) -> str | None:
+    """Return the locator in a ``^start\\l`` or ``^start\\p`` form.
+
+    Either case reads the same, so the shift key is optional.
+    """
+    if not pattern.startswith("^"):
+        return None
+    for form in (suffix.lower(), suffix.upper()):
+        if pattern.endswith(form):
+            start = pattern[1 : -len(form)]
+            return start or None
+    return None
+
+
+def line_suffix_start(pattern: str) -> str | None:
+    return block_start_pattern(pattern, LINE_SUFFIX)
+
+
+def paragraph_suffix_start(pattern: str) -> str | None:
+    return block_start_pattern(pattern, PARAGRAPH_SUFFIX)
+
+
+def paragraph_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
+    """Grow an offset range to the blank-line boundaries around it."""
+    head = clean.rfind("\n\n", 0, start)
+    top = 0 if head < 0 else head + 2
+    tail = clean.find("\n\n", max(start, end - 1))
+    bottom = len(clean) if tail < 0 else tail
+    while bottom > top and clean[bottom - 1] == "\n":
+        bottom -= 1
+    return top, bottom
+
+
+def line_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
+    """Grow an offset range to the logical lines that hold it."""
+    top = clean.rfind("\n", 0, start) + 1
+    tail = clean.find("\n", max(start, end - 1))
+    return top, len(clean) if tail < 0 else tail
 
 
 def sentence_start_pattern(pattern: str) -> str | None:
@@ -261,12 +340,42 @@ def line_start_offsets(lines: list[str]) -> list[int]:
     return offsets
 
 
+def block_matches(clean: str, locator: str, bounds, flags: re.RegexFlag) -> list[Match]:
+    """Expand every locator hit to its surrounding block, without repeats."""
+    seen: set[tuple[int, int]] = set()
+    matches = []
+    for found in regex_matches_latest(clean, locator, flags=flags):
+        span = bounds(clean, *selection_span(found))
+        if span in seen:
+            continue
+        seen.add(span)
+        matches.append(offsets_result(clean, *span))
+    return matches
+
+
 def find_matches_latest(text: str, pattern: str) -> list[Match]:
     """Return every viable expansion from newest source position to oldest."""
-    clean = clean_scrollback(text)
+    lines, indents = scrollback_lines(text)
+    whole_line = selects_whole_line(pattern)
+    return [
+        restore_indent(match, indents, whole_line)
+        for match in clean_matches_latest("\n".join(lines), pattern)
+    ]
+
+
+def clean_matches_latest(clean: str, pattern: str) -> list[Match]:
+    """Choose the selector shape and return its matches, newest first."""
     pattern, flags = query_options(pattern)
     if not pattern:
         return []
+
+    paragraph_start = paragraph_suffix_start(pattern)
+    if paragraph_start is not None:
+        return block_matches(clean, paragraph_start, paragraph_bounds, flags)
+
+    line_start = line_suffix_start(pattern)
+    if line_start is not None:
+        return block_matches(clean, line_start, line_bounds, flags)
 
     landmark_tail = landmark_line_tail_pattern(pattern)
     if landmark_tail is not None:
@@ -553,6 +662,7 @@ def marker_highlight_pattern(query: str, match: Match | None) -> str:
 def native_highlight_pattern(query: str, match: Match | None = None) -> str:
     """Choose the stable single-line locator for tmux's native highlighter."""
     query, _ = query_options(query)
+    query = block_highlight_query(query) or query
     if has_selection_markers(query):
         return marker_highlight_pattern(query, match)
     landmark_tail = landmark_line_tail_pattern(query)
@@ -586,9 +696,18 @@ def native_highlight_pattern(query: str, match: Match | None = None) -> str:
     return prose_friendly_pattern(query)
 
 
-def native_selection_start_pattern(query: str) -> str | None:
+def native_selection_start_pattern(
+    query: str, match: Match | None = None
+) -> str | None:
     """Return the first locator when the exact match needs a copy selection."""
     query, _ = query_options(query)
+    if paragraph_suffix_start(query) is not None:
+        # The paragraph opens above the locator, so the search has to start
+        # from the text itself. Its first word is the only anchor there is.
+        first = re.search(r"\S+", match.text) if match is not None else None
+        return prose_friendly_pattern(ere_literal(first.group(0))) if first else None
+    if line_suffix_start(query) is not None:
+        return None
     if SELECTION_START in query:
         body = strip_selection_markers(query.partition(SELECTION_START)[2])
         start = leading_literal(body)
@@ -630,7 +749,11 @@ def selection_end_fragment(match: Match) -> tuple[str, int] | None:
 
 def native_search_occurrence(text: str, query: str, match: Match) -> int | None:
     """Map the stored source offset to tmux's backward-search occurrence."""
-    pattern = native_selection_start_pattern(query)
+    pattern = native_selection_start_pattern(query, match)
+    if pattern is None and selects_whole_line(query):
+        # A block form reports one entry per line, while tmux walks every hit
+        # on it. Counting the hits keeps the two in step.
+        pattern = native_highlight_pattern(query, match)
     if pattern is None:
         return None
     clean = clean_scrollback(text)
@@ -640,11 +763,41 @@ def native_search_occurrence(text: str, query: str, match: Match) -> int | None:
     except re.error:
         return None
     positions.reverse()
+    inside = [
+        index
+        for index, position in enumerate(positions)
+        if match.start_offset
+        <= position
+        < max(match.end_offset, match.start_offset + 1)
+    ]
+    if inside:
+        # The earliest hit inside the range is the one the selection is
+        # anchored at. A later hit would start the selection short.
+        return inside[-1]
     return min(
         range(len(positions)),
         key=lambda index: abs(positions[index] - match.start_offset),
         default=0,
     )
+
+
+def block_highlight_query(query: str) -> str | None:
+    """Rewrite a block suffix as its bare locator for the native search."""
+    locator = line_suffix_start(query) or paragraph_suffix_start(query)
+    return None if locator is None else "^" + locator
+
+
+def selects_whole_line(query: str) -> bool:
+    """Report a committed ``^word$`` form, which pastes the logical line.
+
+    Every half-typed literal reads as this form too, so the closing ``$`` is
+    what separates a committed range from a query still being typed. Without
+    that test the selection would flash a whole line on every keystroke.
+    """
+    query, _ = query_options(query)
+    if line_suffix_start(query) is not None:
+        return True
+    return has_terminal_anchor(query) and anchored_line_prefix(query) is not None
 
 
 def show_match(
@@ -656,8 +809,9 @@ def show_match(
     search_occurrence: int | None = None,
 ) -> None:
     selection_start = (
-        native_selection_start_pattern(query) if match is not None else None
+        native_selection_start_pattern(query, match) if match is not None else None
     )
+    whole_line = match is not None and selects_whole_line(query)
     selection_end = selection_end_fragment(match) if selection_start and match else None
     search_pattern = (
         selection_start
@@ -696,7 +850,12 @@ def show_match(
     repeats = search_occurrence if search_occurrence is not None else occurrence
     for _ in range(repeats):
         command.extend([";", "send-keys", "-X", "-t", pane, "search-again"])
-    if selection_end is not None:
+    if whole_line:
+        # The line form has no ending locator to search forward for. Copy mode
+        # spans the logical line for us, soft wraps and trailing padding both.
+        for movement in ("start-of-line", "begin-selection", "end-of-line"):
+            command.extend([";", "send-keys", "-X", "-t", pane, movement])
+    elif selection_end is not None:
         fragment, searches = selection_end
         mode_keys = tmux(
             "display-message", "-p", "-t", pane, "#{mode-keys}", capture_output=True

@@ -47,6 +47,14 @@ class TmuxNavigationTests(unittest.TestCase):
             "print('tokenVALUE tail')\n"
             "print('token other')\n"
             "print('-option selected -tail')\n"
+            "print('')\n"
+            "print('para one')\n"
+            "print('para two')\n"
+            "print('')\n"
+            "print('spec:')\n"
+            "print('  replicas: 3')\n"
+            "print('    nested: true')\n"
+            "print('')\n"
             "input('DEST> ')\n"
         )
         self.pane = self.tmux(
@@ -146,6 +154,22 @@ class TmuxNavigationTests(unittest.TestCase):
             self.assertEqual(self.selected_text(), text)
             self.mod.move_selection(self.pane, str(self.state), "newer", query)
 
+    def test_indented_block_pastes_what_the_selection_shows(self):
+        query = r"^spec\p"
+        match = self.mod.update(self.pane, str(self.state), query)
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "spec:\n  replicas: 3\n    nested: true")
+        self.assertEqual(self.selected_text(), match.text)
+
+    def test_indented_line_pastes_what_the_selection_shows(self):
+        query = r"^replicas\l"
+        match = self.mod.update(self.pane, str(self.state), query)
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "  replicas: 3")
+        self.assertEqual(self.selected_text(), match.text)
+
     def test_initial_query_can_find_a_match_beyond_ten_thousand_lines(self):
         query = "^needle oldest$$"
         match = self.mod.update(self.pane, str(self.state), query)
@@ -173,15 +197,60 @@ class TmuxNavigationTests(unittest.TestCase):
                 match = self.mod.update(self.pane, str(self.state), query)
                 self.assertEqual(self.selected_text(), match.text, (mode, query))
 
+    def test_line_form_selects_the_whole_logical_line(self):
+        for mode in ("vi", "emacs"):
+            self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+            self.tmux("setw", "mode-keys", mode)
+            self.tmux("copy-mode", "-t", self.pane)
+            for query in ("^token$", "^Wrapped$"):
+                self.mod.write_match(self.state, query, None)
+                (self.state / "occurrence").write_text("0")
+                match = self.mod.update(self.pane, str(self.state), query)
+
+                self.assertEqual(self.selected_text(), match.text, (mode, query))
+
     def test_case_sensitive_override_matches_the_native_highlights(self):
         query = r"^\Cpython$"
         match = self.mod.update(self.pane, str(self.state), query)
 
         self.assertEqual(match.text, "python old")
-        count = self.tmux("display", "-p", "-t", self.pane, "#{search_count}").stdout
-        self.assertEqual(count.strip(), "1")
+        # A case-insensitive native search would land on PYTHON newest, so the
+        # selected text is what proves tmux honored the override.
+        self.assertEqual(self.selected_text(), match.text)
         self.mod.update(self.pane, str(self.state), query + "$")
         self.assertEqual(self.selected_text(), "python old")
+
+    def test_block_suffixes_match_the_native_selection(self):
+        cases = {
+            r"^token\L": "token other",
+            r"^Wrapped\L": None,
+            r"^para two\P": "para one\npara two",
+            r"^para\P": "para one\npara two",
+        }
+        for mode in ("vi", "emacs"):
+            self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+            self.tmux("setw", "mode-keys", mode)
+            self.tmux("copy-mode", "-t", self.pane)
+            for query, expected in cases.items():
+                self.mod.write_match(self.state, query, None)
+                (self.state / "occurrence").write_text("0")
+                match = self.mod.update(self.pane, str(self.state), query)
+
+                if expected is not None:
+                    self.assertEqual(match.text, expected, (mode, query))
+                self.assertEqual(self.selected_text(), match.text, (mode, query))
+
+    def test_block_navigation_keeps_the_native_selection(self):
+        query = r"^token\l"
+        self.mod.write_match(self.state, query, None)
+        (self.state / "occurrence").write_text("0")
+        self.mod.update(self.pane, str(self.state), query)
+
+        for expected in ("token other", "tokenVALUE tail"):
+            match = self.mod.read_match(self.state, query)
+            self.assertEqual(match.text, expected)
+            self.assertEqual(self.selected_text(), match.text, expected)
+            self.mod.move_selection(self.pane, str(self.state), "older", query)
 
     def test_selection_markers_match_the_native_selection(self):
         cases = {
