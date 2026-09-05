@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# pane_deliver.sh - put selected text into the tmux pane under the popup.
+#
+# Nothing is ever submitted. The text lands on the pane's input line and the
+# human presses Enter. A popup that submits on your behalf submits the wrong
+# thing into a live agent, and there is no undo for that.
+#
+# Two traps live here, both established by probe rather than by reading:
+#
+# 1. paste-buffer WITHOUT -p replays the buffer as keystrokes, so every newline
+#    is an Enter. A three-line payload pasted that way ran as three separate
+#    shell commands. -p wraps the paste in bracketed-paste markers, which
+#    readline and every terminal UI treat as literal text. This matters the
+#    moment a payload can hold more than one line, which is any marked set.
+#
+# 2. The popup owns the client until its process exits, so a paste issued from
+#    inside the popup races the handover and lands in a pane that is still
+#    being torn down. run-shell -b defers it past that.
+#
+# The caller owns its own fallback (clipboard, an error line, whatever fits its
+# UI). This library does one thing and reports whether it worked.
+
+# Optional fallback used by popup integrations that save their source pane in a
+# tmux option before starting this script.
+POPUP_SOURCE_OPTION='@popup_source_pane'
+
+# Resolve the pane to deliver into: explicit argument, then the option the
+# binding set. Nothing else.
+#
+# There is deliberately no $TMUX_PANE fallback. It is empty inside a popup, so
+# it can never help the case it looks like it is there for, and outside a popup
+# it names the caller's OWN pane. That turns a hand-off run from a shell alias
+# into a paste into the terminal you are looking at, reported as a success.
+# Returning empty here is what makes the caller say "no source pane" instead.
+popup_source_pane() {
+	local pane="${1:-}"
+	if [[ -z $pane ]] && command -v tmux >/dev/null 2>&1; then
+		pane="$(tmux show-option -gqv "$POPUP_SOURCE_OPTION" 2>/dev/null || true)"
+	fi
+	printf '%s' "$pane"
+}
+
+# Test the output, not the exit status: `display-message -t` reports an unknown
+# pane by printing nothing and still exiting 0, so branching on the status makes
+# the check always true and any fallback unreachable. The paste then fails
+# inside a backgrounded run-shell, where nobody sees it, and the payload is lost
+# with no error.
+pane_is_live() {
+	[[ -n "${1:-}" ]] || return 1
+	[[ -n "$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null)" ]]
+}
+
+queue_pane_buffer() {
+	local target="$1" buffer="$2"
+	tmux run-shell -b "sleep 0.15; tmux paste-buffer -p -b '$buffer' -t '$target' -d" 2>/dev/null || {
+		tmux delete-buffer -b "$buffer" 2>/dev/null || true
+		return 1
+	}
+}
+
+# deliver_to_pane <target-pane> <content>
+# Returns non-zero when the pane is gone or tmux refuses the buffer, so the
+# caller can fall back instead of reporting a success that never happened.
+deliver_to_pane() {
+	local target="${1:-}" content="${2:-}" buffer
+	pane_is_live "$target" || return 1
+	[[ -n $content ]] || return 1
+
+	# Buffer name carries the pane and pid so two popups delivering at once
+	# cannot consume each other's buffer.
+	buffer="pane-deliver-${target#%}-$$"
+	printf '%s' "$content" | tmux load-buffer -b "$buffer" - 2>/dev/null || return 1
+	queue_pane_buffer "$target" "$buffer"
+}
+
+# deliver_file_to_pane <target-pane> <path>
+# File input avoids putting a multiline match into argv while preserving the
+# same deferred, bracketed-paste delivery used by popup text.
+deliver_file_to_pane() {
+	local target="${1:-}" path="${2:-}" buffer
+	pane_is_live "$target" || return 1
+	[[ -s $path ]] || return 1
+
+	buffer="pane-deliver-${target#%}-$$"
+	tmux load-buffer -b "$buffer" "$path" 2>/dev/null || return 1
+	queue_pane_buffer "$target" "$buffer"
+}
+
+# Clear the handover option once consumed, so a later popup opened by some
+# other path cannot inherit a stale target.
+clear_popup_source_pane() {
+	tmux set-option -gu "$POPUP_SOURCE_OPTION" 2>/dev/null || true
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	[[ ${1:-} == --file ]] || exit 2
+	deliver_file_to_pane "${2:-}" "${3:-}"
+fi
