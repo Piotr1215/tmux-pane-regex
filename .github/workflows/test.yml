@@ -15,8 +15,24 @@ jobs:
       - name: Install test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats
+          sudo apt-get install -y bats build-essential libevent-dev libncurses-dev bison pkg-config
           python -m pip install ruff==0.16.4
+      - name: Install tmux for native selection tests
+        run: |
+          curl -fsSL https://github.com/tmux/tmux/releases/download/3.7c/tmux-3.7c.tar.gz -o "$RUNNER_TEMP/tmux.tar.gz"
+          echo "7c60cae9a0e25288e2e24750aafc9e8800fc7fd4555e447e1b29ee4201cfb3bf  $RUNNER_TEMP/tmux.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/tmux.tar.gz" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/tmux-3.7c"
+          ./configure --prefix="$RUNNER_TEMP/tmux"
+          make -j2
+          make install
+          echo "$RUNNER_TEMP/tmux/bin" >> "$GITHUB_PATH"
+      - name: Install fzf for popup tests
+        run: |
+          curl -fsSL https://github.com/junegunn/fzf/releases/download/v0.74.3/fzf-0.74.3-linux_amd64.tar.gz -o "$RUNNER_TEMP/fzf.tar.gz"
+          echo "3501a595e4b5c40a6b047340a0e8f805c46fd4e61ef95ef8a136ba8c61cf6f22  $RUNNER_TEMP/fzf.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/fzf.tar.gz" -C "$RUNNER_TEMP" fzf
+          sudo install -m 755 "$RUNNER_TEMP/fzf" /usr/local/bin/fzf
       - name: Test
         run: |
           python -m unittest discover -s tests
