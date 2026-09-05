@@ -526,9 +526,35 @@ def native_ignore_case_pattern(pattern: str) -> str:
     )
 
 
+def marker_highlight_pattern(query: str, match: Match | None) -> str:
+    r"""Build the tmux locator for a query that carries selection markers.
+
+    tmux searches ERE and knows neither marker, and context left inside the
+    pattern becomes part of the native selection whenever the ending fragment
+    cannot trim it. Both sides go, so the highlight is the selection.
+    """
+    body = query[1:] if query.startswith("^") else query
+    line_tail = False
+    if body.endswith("$$"):
+        body, line_tail = body[:-2], True
+    elif body.endswith(SENTENCE_SUFFIX):
+        body, line_tail = body[: -len(SENTENCE_SUFFIX)], True
+    if SELECTION_START in body:
+        body = body.partition(SELECTION_START)[2]
+    body = body.partition(SELECTION_END)[0]
+    if line_tail or (match is not None and "\n" in match.text):
+        prefix = leading_literal(body)
+        if prefix:
+            start = prose_friendly_pattern(ere_literal(prefix))
+            return f"({start}.*[^[:space:]]|{start})"
+    return prose_friendly_pattern(body)
+
+
 def native_highlight_pattern(query: str, match: Match | None = None) -> str:
     """Choose the stable single-line locator for tmux's native highlighter."""
     query, _ = query_options(query)
+    if has_selection_markers(query):
+        return marker_highlight_pattern(query, match)
     landmark_tail = landmark_line_tail_pattern(query)
     if landmark_tail is not None:
         prefix = leading_literal(landmark_tail)

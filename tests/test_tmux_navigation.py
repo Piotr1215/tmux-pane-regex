@@ -183,6 +183,20 @@ class TmuxNavigationTests(unittest.TestCase):
         self.mod.update(self.pane, str(self.state), query + "$")
         self.assertEqual(self.selected_text(), "python old")
 
+    def test_selection_markers_match_the_native_selection(self):
+        cases = {
+            r"^token\zsVALUE": "VALUE",
+            r"^tokenVALUE\ze tail": "tokenVALUE",
+            r"^token\zsVALUE$$": "VALUE tail",
+        }
+        for query, expected in cases.items():
+            self.mod.write_match(self.state, query, None)
+            (self.state / "occurrence").write_text("0")
+            match = self.mod.update(self.pane, str(self.state), query)
+
+            self.assertEqual(match.text, expected, query)
+            self.assertEqual(self.selected_text(), match.text, query)
+
     def test_case_folding_keeps_negated_regex_escapes(self):
         match = self.mod.update(self.pane, str(self.state), r"^TOKEN\S+$$")
 
