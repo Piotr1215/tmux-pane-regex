@@ -50,14 +50,21 @@ output:
 | `^price\$` | A literal final dollar sign |
 
 The first `.*` in a landmark range stops at the first viable ending locator.
-Matches are case-sensitive. A straight apostrophe also matches a smart
-apostrophe.
+Matches are case-insensitive and preserve the original text when pasted.
+A straight apostrophe also matches a smart apostrophe.
+
+Add `\C` before the locator to make a query case-sensitive: `^\Cpython$$`
+selects from lowercase `python` through its line end, while `\Cpython`
+selects just the word. Uppercase letters alone do not change the default.
 
 - Up selects an older occurrence.
 - Down selects a newer occurrence.
 - Enter or Tab pastes the current selection.
 - Space accepts when the query ends in an unescaped `$`.
 - Esc closes the picker without pasting.
+
+Navigation has no match-count limit and searches all history retained by tmux.
+The tmux `history-limit` setting still controls how much scrollback exists.
 
 Pasted text uses tmux bracketed paste. It never submits a command or message.
 
@@ -82,7 +89,7 @@ focus detection.
 
 ## How it works
 
-The script captures up to 10,000 lines from the target pane and joins tmux soft
+The script captures all retained history from the target pane and joins tmux soft
 wraps. Python regex matching chooses the exact source range. The visible
 feedback is then rendered in the source pane with tmux's native search and
 copy-mode selection primitives. Accepting writes the match to a named tmux

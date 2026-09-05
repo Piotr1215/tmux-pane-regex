@@ -44,8 +44,8 @@ The documented selector forms are public behavior:
 - `^start\ss` stops after the first sentence-ending `.`, `?`, or `!`.
 - A final `\$` matches a literal dollar sign.
 
-Matching is case-sensitive. A straight apostrophe also matches a smart
-apostrophe.
+Matching is case-insensitive by default. `\C` before the first locator makes
+the query case-sensitive. A straight apostrophe also matches a smart apostrophe.
 
 ## Changes
 

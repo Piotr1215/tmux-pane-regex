@@ -32,6 +32,14 @@ class Match:
     end_offset: int = 0
 
 
+def query_options(query: str) -> tuple[str, re.RegexFlag]:
+    """Recognize a case-sensitive override before the first locator."""
+    marker = 1 if query.startswith("^") else 0
+    if query[marker : marker + 2] == r"\C":
+        return query[:marker] + query[marker + 2 :], re.RegexFlag(0)
+    return query, re.IGNORECASE
+
+
 def clean_scrollback(text: str) -> str:
     """Remove terminal UI margins while retaining hard line boundaries."""
     margin = re.compile(r"^\s*(?:[•›]\s+)?")
@@ -151,15 +159,21 @@ def leading_literal(pattern: str) -> str:
 
 
 def regex_matches_latest(
-    text: str, pattern: str, *, locator_pattern: str | None = None
+    text: str,
+    pattern: str,
+    *,
+    locator_pattern: str | None = None,
+    flags: re.RegexFlag = re.IGNORECASE,
 ) -> list[re.Match[str]]:
     """Return viable matches from newest start to oldest start."""
-    compiled = re.compile(prose_friendly_pattern(pattern), re.MULTILINE | re.DOTALL)
+    compiled = re.compile(
+        prose_friendly_pattern(pattern), re.MULTILINE | re.DOTALL | flags
+    )
     prefix = leading_literal(
         locator_pattern if locator_pattern is not None else pattern
     )
     if prefix:
-        prefix_pattern = re.compile(prose_friendly_pattern(re.escape(prefix)))
+        prefix_pattern = re.compile(prose_friendly_pattern(re.escape(prefix)), flags)
         starts = [candidate.start() for candidate in prefix_pattern.finditer(text)]
         matches = []
         for start in reversed(starts):
@@ -205,12 +219,13 @@ def line_start_offsets(lines: list[str]) -> list[int]:
 def find_matches_latest(text: str, pattern: str) -> list[Match]:
     """Return every viable expansion from newest source position to oldest."""
     clean = clean_scrollback(text)
+    pattern, flags = query_options(pattern)
     if not pattern:
         return []
 
     landmark_tail = landmark_line_tail_pattern(pattern)
     if landmark_tail is not None:
-        found_matches = regex_matches_latest(clean, landmark_tail)
+        found_matches = regex_matches_latest(clean, landmark_tail, flags=flags)
         matches = []
         for found in found_matches:
             line_end = clean.find("\n", found.end())
@@ -233,13 +248,15 @@ def find_matches_latest(text: str, pattern: str) -> list[Match]:
     if sentence_start is not None:
         sentence_pattern = f"(?:{sentence_start})[^.!?]*[.!?]"
         found_matches = regex_matches_latest(
-            clean, sentence_pattern, locator_pattern=sentence_start
+            clean, sentence_pattern, locator_pattern=sentence_start, flags=flags
         )
         return [regex_match_result(clean, found) for found in found_matches]
 
     line_prefix = anchored_line_prefix(pattern)
     if line_prefix is not None:
-        compiled_prefix = re.compile(prose_friendly_pattern(re.escape(line_prefix)))
+        compiled_prefix = re.compile(
+            prose_friendly_pattern(re.escape(line_prefix)), flags
+        )
         lines = clean.splitlines()
         offsets = line_start_offsets(lines)
         matches = []
@@ -264,7 +281,9 @@ def find_matches_latest(text: str, pattern: str) -> list[Match]:
         offsets = line_start_offsets(lines)
         matches = []
         for index in range(len(lines) - 1, -1, -1):
-            for found in regex_matches_latest(lines[index], line_start_pattern):
+            for found in regex_matches_latest(
+                lines[index], line_start_pattern, flags=flags
+            ):
                 start = offsets[index] + found.start()
                 matches.append(
                     Match(
@@ -282,9 +301,9 @@ def find_matches_latest(text: str, pattern: str) -> list[Match]:
         if not range_pattern:
             return []
         range_pattern = first_landmark_pattern(range_pattern)
-        found_matches = regex_matches_latest(clean, range_pattern)
+        found_matches = regex_matches_latest(clean, range_pattern, flags=flags)
     else:
-        found_matches = regex_matches_latest(clean, pattern)
+        found_matches = regex_matches_latest(clean, pattern, flags=flags)
     return [regex_match_result(clean, found) for found in found_matches]
 
 
@@ -454,8 +473,22 @@ def ere_literal(text: str) -> str:
     return re.sub(r"([\\.\[\]{}()*+?^$|])", r"\\\1", text)
 
 
+def native_ignore_case_pattern(pattern: str) -> str:
+    """Use tmux smart case without changing negated regex character classes."""
+    classes = {
+        r"\D": "[^[:digit:]]",
+        r"\S": "[^[:space:]]",
+        r"\W": "[^[:alnum:]_]",
+    }
+    return "".join(
+        classes.get(token, token) if token.startswith("\\") else token.lower()
+        for token in re.findall(r"\\.|[^\\]+|\\$", pattern)
+    )
+
+
 def native_highlight_pattern(query: str, match: Match | None = None) -> str:
     """Choose the stable single-line locator for tmux's native highlighter."""
+    query, _ = query_options(query)
     landmark_tail = landmark_line_tail_pattern(query)
     if landmark_tail is not None:
         prefix = leading_literal(landmark_tail)
@@ -489,6 +522,7 @@ def native_highlight_pattern(query: str, match: Match | None = None) -> str:
 
 def native_selection_start_pattern(query: str) -> str | None:
     """Return the first locator when the exact match needs a copy selection."""
+    query, _ = query_options(query)
     if anchored_line_prefix(query) is not None:
         return None
     start = sentence_start_pattern(query)
@@ -515,15 +549,10 @@ def selection_end_fragment(match: Match) -> tuple[str, int] | None:
     if found is None:
         return None
     fragment = found.group(0)
-    positions = []
-    cursor = 0
-    while True:
-        position = text.find(fragment, cursor)
-        if position < 0:
-            break
-        positions.append(position)
-        cursor = position + len(fragment)
-    searches = sum(position > 0 for position in positions)
+    searches = sum(
+        found.start() > 0
+        for found in re.finditer(re.escape(fragment), text, re.IGNORECASE)
+    )
     if searches == 0:
         return None
     return fragment, searches
@@ -535,8 +564,9 @@ def native_search_occurrence(text: str, query: str, match: Match) -> int | None:
     if pattern is None:
         return None
     clean = clean_scrollback(text)
+    _, flags = query_options(query)
     try:
-        positions = [found.start() for found in re.finditer(pattern, clean)]
+        positions = [found.start() for found in re.finditer(pattern, clean, flags)]
     except re.error:
         return None
     positions.reverse()
@@ -564,6 +594,14 @@ def show_match(
         if selection_end is not None
         else native_highlight_pattern(query, match)
     )
+    _, flags = query_options(query)
+    if flags & re.IGNORECASE:
+        # tmux uses smart case: lowercase searches include all case variants.
+        search_pattern = native_ignore_case_pattern(search_pattern)
+    else:
+        # tmux has no case-sensitive switch. An impossible uppercase branch
+        # disables smart case without adding any possible search matches.
+        search_pattern = f"({search_pattern})|(^A$)(^B$)"
     command = [
         "send-keys",
         "-X",
@@ -590,6 +628,9 @@ def show_match(
         command.extend([";", "send-keys", "-X", "-t", pane, "search-again"])
     if selection_end is not None:
         fragment, searches = selection_end
+        mode_keys = tmux(
+            "display-message", "-p", "-t", pane, "#{mode-keys}", capture_output=True
+        ).stdout.strip()
         command.extend([";", "send-keys", "-X", "-t", pane, "begin-selection"])
         for _ in range(searches):
             command.extend(
@@ -601,10 +642,15 @@ def show_match(
                     pane,
                     "search-forward-text",
                     "--",
-                    fragment,
+                    fragment.lower(),
                 ]
             )
-        if len(fragment) > 1:
+        if mode_keys == "emacs":
+            # Search moves the Emacs cursor past the word after updating the
+            # selection. Refresh that endpoint with a round trip of one cell.
+            for movement in ("cursor-left", "cursor-right"):
+                command.extend([";", "send-keys", "-X", "-t", pane, movement])
+        elif len(fragment) > 1:
             command.extend(
                 [
                     ";",
@@ -655,7 +701,7 @@ def update(pane: str, state_name: str, query: str) -> Match | None:
         occurrence = read_occurrence(state)
 
         captured = tmux(
-            "capture-pane", "-p", "-J", "-S", "-10000", "-t", pane, capture_output=True
+            "capture-pane", "-p", "-J", "-S", "-", "-t", pane, capture_output=True
         ).stdout
         try:
             anchor_offset = (
@@ -705,7 +751,7 @@ def move_selection(pane: str, state_name: str, direction: str, query: str) -> No
             "-p",
             "-J",
             "-S",
-            "-10000",
+            "-",
             "-t",
             pane,
             capture_output=True,

@@ -138,6 +138,34 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.text, "screenshot text to reuse")
 
+    def test_selectors_ignore_case_and_keep_original_text(self):
+        text = "prefix PYTHON starts here. More details.\nEND of the range\nafter\n"
+        for query, expected in (
+            ("^python$", "prefix PYTHON starts here. More details."),
+            ("^python$$", "PYTHON starts here. More details."),
+            (r"^python\ss", "PYTHON starts here."),
+            ("^python.*end", "PYTHON starts here. More details.\nEND"),
+            ("^python.*end$$", "PYTHON starts here. More details.\nEND of the range"),
+            ("python", "PYTHON"),
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
+
+    def test_selection_end_counts_all_case_variants_of_the_final_word(self):
+        match = self.mod.Match("start END and end", 0, 0)
+
+        self.assertEqual(self.mod.selection_end_fragment(match), ("end", 2))
+
+    def test_capital_c_requests_case_sensitive_matching(self):
+        text = "python old\nPython mixed\nPYTHON newest\n"
+        for query, expected in (
+            (r"^\Cpython$$", "python old"),
+            (r"^\CPython$", "Python mixed"),
+            (r"\Cpython", "python"),
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
+
     def test_double_dollar_extends_a_landmark_range_through_its_last_line(self):
         text = (
             "prefix master change\n"
