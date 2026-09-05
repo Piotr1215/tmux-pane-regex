@@ -47,11 +47,19 @@ output:
 | `^start$$` | From `start` through that logical line's last visible character |
 | `^start.*end$$` | Through the last visible character on the ending line |
 | `^start\ss` | Through the first `.`, `?`, or `!` |
+| `^start\zsword` | Selects from `word`, with `start` matched as context |
+| `^word\zeend` | Selects `word`, with `end` matched but left out |
 | `^price\$` | A literal final dollar sign |
 
 The first `.*` in a landmark range stops at the first viable ending locator.
 Matches are case-insensitive and preserve the original text when pasted.
 A straight apostrophe also matches a smart apostrophe.
+
+`\zs` and `\ze` move the selection boundaries the way they do in vim. The text
+outside them still has to match, it is just not selected. The context before
+`\zs` has no width limit, so `^branch.*\zsunlim` works where a Python lookbehind
+cannot compile at all. Both markers compose with `$$` and `\ss`, which keep
+owning the end of the range.
 
 Add `\C` before the locator to make a query case-sensitive: `^\Cpython$$`
 selects from lowercase `python` through its line end, while `\Cpython`

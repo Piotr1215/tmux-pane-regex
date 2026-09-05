@@ -21,6 +21,9 @@ DELIVER = SCRIPT.with_name("pane_deliver.sh")
 INITIAL_QUERY = "^"
 INLINE_TRIGGER = ";;^"
 SENTENCE_SUFFIX = r"\ss"
+SELECTION_START = r"\zs"
+SELECTION_END = r"\ze"
+SELECTION_GROUP = "sel"
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,35 @@ def query_options(query: str) -> tuple[str, re.RegexFlag]:
     if query[marker : marker + 2] == r"\C":
         return query[:marker] + query[marker + 2 :], re.RegexFlag(0)
     return query, re.IGNORECASE
+
+
+def has_selection_markers(pattern: str) -> bool:
+    return SELECTION_START in pattern or SELECTION_END in pattern
+
+
+def strip_selection_markers(pattern: str) -> str:
+    """Return the pattern as typed, without the selection markers."""
+    return pattern.replace(SELECTION_START, "").replace(SELECTION_END, "")
+
+
+def selection_group_pattern(pattern: str) -> str:
+    r"""Translate ``\zs`` and ``\ze`` into one named selection group."""
+    if not has_selection_markers(pattern):
+        return pattern
+    head, _, rest = pattern.partition(SELECTION_START)
+    if SELECTION_START not in pattern:
+        head, rest = "", pattern
+    body, _, tail = rest.partition(SELECTION_END)
+    return f"{head}(?P<{SELECTION_GROUP}>{body}){tail}"
+
+
+def selection_span(found: re.Match[str]) -> tuple[int, int]:
+    """Return the marked selection range, or the whole match without markers."""
+    if SELECTION_GROUP in found.re.groupindex:
+        start, end = found.span(SELECTION_GROUP)
+        if start >= 0:
+            return start, end
+    return found.start(), found.end()
 
 
 def clean_scrollback(text: str) -> str:
@@ -158,6 +190,11 @@ def leading_literal(pattern: str) -> str:
     return "".join(literal)
 
 
+def viable_match(found: re.Match[str]) -> bool:
+    start, end = selection_span(found)
+    return end > start
+
+
 def regex_matches_latest(
     text: str,
     pattern: str,
@@ -167,10 +204,13 @@ def regex_matches_latest(
 ) -> list[re.Match[str]]:
     """Return viable matches from newest start to oldest start."""
     compiled = re.compile(
-        prose_friendly_pattern(pattern), re.MULTILINE | re.DOTALL | flags
+        prose_friendly_pattern(selection_group_pattern(pattern)),
+        re.MULTILINE | re.DOTALL | flags,
     )
     prefix = leading_literal(
-        locator_pattern if locator_pattern is not None else pattern
+        strip_selection_markers(
+            locator_pattern if locator_pattern is not None else pattern
+        )
     )
     if prefix:
         prefix_pattern = re.compile(prose_friendly_pattern(re.escape(prefix)), flags)
@@ -178,14 +218,14 @@ def regex_matches_latest(
         matches = []
         for start in reversed(starts):
             candidate = compiled.match(text, start)
-            if candidate is not None and candidate.end() > candidate.start():
+            if candidate is not None and viable_match(candidate):
                 matches.append(candidate)
         return matches
 
     return [
         candidate
         for candidate in reversed(list(compiled.finditer(text)))
-        if candidate.end() > candidate.start()
+        if viable_match(candidate)
     ]
 
 
@@ -195,16 +235,21 @@ def latest_regex_match(text: str, pattern: str) -> re.Match[str] | None:
     return matches[0] if matches else None
 
 
-def regex_match_result(clean: str, found: re.Match[str]) -> Match:
-    start_line = clean.count("\n", 0, found.start())
-    end_line = clean.count("\n", 0, max(found.start(), found.end() - 1))
+def offsets_result(clean: str, start: int, end: int) -> Match:
+    start_line = clean.count("\n", 0, start)
+    end_line = clean.count("\n", 0, max(start, end - 1))
     return Match(
-        found.group(0),
+        clean[start:end],
         start_line,
         end_line,
-        start_offset=found.start(),
-        end_offset=found.end(),
+        start_offset=start,
+        end_offset=end,
     )
+
+
+def regex_match_result(clean: str, found: re.Match[str]) -> Match:
+    start, end = selection_span(found)
+    return offsets_result(clean, start, end)
 
 
 def line_start_offsets(lines: list[str]) -> list[int]:
@@ -228,20 +273,11 @@ def find_matches_latest(text: str, pattern: str) -> list[Match]:
         found_matches = regex_matches_latest(clean, landmark_tail, flags=flags)
         matches = []
         for found in found_matches:
-            line_end = clean.find("\n", found.end())
+            start, end = selection_span(found)
+            line_end = clean.find("\n", end)
             if line_end < 0:
                 line_end = len(clean)
-            start_line = clean.count("\n", 0, found.start())
-            end_line = clean.count("\n", 0, max(found.start(), line_end - 1))
-            matches.append(
-                Match(
-                    clean[found.start() : line_end],
-                    start_line,
-                    end_line,
-                    start_offset=found.start(),
-                    end_offset=line_end,
-                )
-            )
+            matches.append(offsets_result(clean, start, line_end))
         return matches
 
     sentence_start = sentence_start_pattern(pattern)
@@ -250,7 +286,10 @@ def find_matches_latest(text: str, pattern: str) -> list[Match]:
         found_matches = regex_matches_latest(
             clean, sentence_pattern, locator_pattern=sentence_start, flags=flags
         )
-        return [regex_match_result(clean, found) for found in found_matches]
+        return [
+            offsets_result(clean, selection_span(found)[0], found.end())
+            for found in found_matches
+        ]
 
     line_prefix = anchored_line_prefix(pattern)
     if line_prefix is not None:
@@ -284,10 +323,11 @@ def find_matches_latest(text: str, pattern: str) -> list[Match]:
             for found in regex_matches_latest(
                 lines[index], line_start_pattern, flags=flags
             ):
-                start = offsets[index] + found.start()
+                column = selection_span(found)[0]
+                start = offsets[index] + column
                 matches.append(
                     Match(
-                        lines[index][found.start() :],
+                        lines[index][column:],
                         index,
                         index,
                         start_offset=start,
@@ -523,6 +563,10 @@ def native_highlight_pattern(query: str, match: Match | None = None) -> str:
 def native_selection_start_pattern(query: str) -> str | None:
     """Return the first locator when the exact match needs a copy selection."""
     query, _ = query_options(query)
+    if SELECTION_START in query:
+        body = strip_selection_markers(query.partition(SELECTION_START)[2])
+        start = leading_literal(body)
+        return prose_friendly_pattern(ere_literal(start)) if start else None
     if anchored_line_prefix(query) is not None:
         return None
     start = sentence_start_pattern(query)

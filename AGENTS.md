@@ -28,6 +28,8 @@ it. Keep the interaction fast, local, and safe for shells and agent prompts.
   `run-shell` so multiline text cannot execute while the popup closes.
 - Python chooses the exact source range. Native tmux search and copy-mode
   selection must show that same range. Never add a second synthetic highlighter.
+- The native tmux search follows the selection start, so a `\zs` query highlights
+  the selected text and not its context.
 - Up selects an older occurrence. Down selects a newer one. Query refinement
   keeps the selected source position instead of resetting to the newest match.
 - Soft-wrapped text stays logical text. Multiline ranges start at the newest
@@ -43,6 +45,9 @@ The documented selector forms are public behavior:
 - `^start.*end$$` includes the rest of the ending logical line.
 - `^start\ss` stops after the first sentence-ending `.`, `?`, or `!`.
 - A final `\$` matches a literal dollar sign.
+- `\zs` and `\ze` mark where the selection starts and ends. Text outside them
+  must match and stays out of the selection. They translate to one named group,
+  never to a lookaround, so the context carries no fixed-width limit.
 
 Matching is case-insensitive by default. `\C` before the first locator makes
 the query case-sensitive. A straight apostrophe also matches a smart apostrophe.

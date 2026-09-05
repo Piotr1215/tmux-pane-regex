@@ -182,6 +182,63 @@ class PaneRegexMatchTests(unittest.TestCase):
             "master change\ndetails\n2 files changed, 3 insertions, 4 deletions(-)",
         )
 
+    def test_ze_excludes_the_context_after_the_selection(self):
+        text = "zsh: command not found: teelder\n"
+
+        match = self.mod.find_latest_match(text, r"^comma.*\ze:")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "command not found")
+
+    def test_zs_excludes_the_context_before_the_selection(self):
+        text = "branch fix/unlimited here\n"
+
+        match = self.mod.find_latest_match(text, r"^fix/\zsunlim")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "unlim")
+        self.assertEqual(text[match.start_offset : match.end_offset], "unlim")
+
+    def test_zs_accepts_a_variable_width_context(self):
+        text = "branch fix/unlimited here\n"
+
+        match = self.mod.find_latest_match(text, r"^branch.*\zsunlim")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "unlim")
+
+    def test_zs_and_ze_bound_both_ends(self):
+        text = "branch fix/unlimited here\n"
+
+        match = self.mod.find_latest_match(text, r"^fix/\zsunlimited\ze here")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "unlimited")
+
+    def test_zs_composes_with_the_line_tail_shorthand(self):
+        text = "branch fix/unlimited here\n"
+
+        match = self.mod.find_latest_match(text, r"^fix/\zsunlim$$")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "unlimited here")
+
+    def test_ze_keeps_occurrence_navigation(self):
+        text = "old comma: one\nnew comma: two\n"
+
+        newest = self.mod.find_latest_match(text, r"^comma\ze:")
+        older = self.mod.find_latest_match(text, r"^comma\ze:", occurrence=1)
+
+        self.assertIsNotNone(newest)
+        self.assertIsNotNone(older)
+        self.assertEqual(newest.start_line, 1)
+        self.assertEqual(older.start_line, 0)
+
+    def test_native_start_pattern_follows_the_selection_marker(self):
+        pattern = self.mod.native_selection_start_pattern(r"^fix/\zsunlim")
+
+        self.assertEqual(pattern, "unlim")
+
     def test_sentence_shorthand_stops_after_the_first_sentence_end(self):
         text = "before\nThen this wraps\nonto the next line. Keep this out!\nafter\n"
 
