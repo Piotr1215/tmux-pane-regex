@@ -18,14 +18,19 @@ search and copy-mode styles, including soft-wrapped and multiline text.
 
 Clone the repository, then load it near the end of `.tmux.conf`:
 
+```sh
+git clone https://github.com/Piotr1215/tmux-pane-regex \
+  ~/.tmux/plugins/tmux-pane-regex
+```
+
 ```tmux
 run-shell '~/.tmux/plugins/tmux-pane-regex/tmux-pane-regex.tmux'
 ```
 
-With TPM, use the repository name after it is published:
+With TPM:
 
 ```tmux
-set -g @plugin '<github-user>/tmux-pane-regex'
+set -g @plugin 'Piotr1215/tmux-pane-regex'
 ```
 
 Reload tmux, then press `prefix + R`.
