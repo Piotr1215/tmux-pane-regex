@@ -1011,7 +1011,9 @@ def move_selection(pane: str, state_name: str, direction: str, query: str) -> No
         )
 
 
-def action_for_accept(pane: str, state_name: str, query: str, *, space: bool) -> str:
+def action_for_accept(
+    pane: str, state_name: str, query: str, *, space: bool, clipboard: bool = False
+) -> str:
     state = state_path(state_name)
     if space and not has_terminal_anchor(query):
         return "put( )"
@@ -1026,6 +1028,8 @@ def action_for_accept(pane: str, state_name: str, query: str, *, space: bool) ->
     )
     if action == "no-match":
         return "change-header(No match. Keep typing or press Esc)"
+    if action == "accept":
+        (state / "action").write_text("copy" if clipboard else "paste")
     return action
 
 
@@ -1042,7 +1046,7 @@ def erase_inline_trigger(pane: str, state: Path) -> None:
         tmux("send-keys", "-t", pane, "-N", str(erase), "BSpace")
 
 
-def accept(pane: str, state: Path, query: str) -> None:
+def accept(pane: str, state: Path, query: str, *, clipboard: bool = False) -> None:
     match = read_match(state, query)
     if match is None:
         cancel(pane)
@@ -1051,7 +1055,16 @@ def accept(pane: str, state: Path, query: str) -> None:
     match_file.write_text(match.text)
     cancel(pane)
     erase_inline_trigger(pane, state)
-    run(["bash", str(DELIVER), "--file", pane, str(match_file)])
+    if clipboard:
+        client = tmux(
+            "display-message", "-p", "-t", pane, "#{client_name}", capture_output=True
+        ).stdout.strip()
+        try:
+            tmux("load-buffer", "-w", "-t", client, "-b", state.name, str(match_file))
+        finally:
+            tmux("delete-buffer", "-b", state.name, check=False)
+    else:
+        run(["bash", str(DELIVER), "--file", pane, str(match_file)])
 
 
 def watch_queries(pane: str, state_name: str) -> int:
@@ -1078,6 +1091,7 @@ def fzf_command(pane: str, state: Path, initial_query: str) -> list[str]:
         f"printf %s {{q}} > {desired_new} && mv -f -- {desired_new} {desired}"
     )
     accept_command = shlex.join([*base, "--accept-action", pane, str(state)]) + " {q}"
+    copy_command = shlex.join([*base, "--copy-action", pane, str(state)]) + " {q}"
     space_command = shlex.join([*base, "--space-action", pane, str(state)]) + " {q}"
     older_command = shlex.join([*base, "--move", pane, str(state), "older"]) + " {q}"
     newer_command = shlex.join([*base, "--move", pane, str(state), "newer"]) + " {q}"
@@ -1091,13 +1105,15 @@ def fzf_command(pane: str, state: Path, initial_query: str) -> list[str]:
         "--pointer=",
         "--marker=",
         "--prompt=regex> ",
-        r"--header=Up older. Down newer. \ss sentence. Tab or Enter expands.",
+        r"--header=Up older. Down newer. Enter/Tab paste. Ctrl-Y copy. \ss sentence.",
         f"--query={initial_query}",
         "--print-query",
         "--bind",
         f"start,change:execute-silent({record_query})",
         "--bind",
         f"tab,enter:transform({accept_command})",
+        "--bind",
+        f"ctrl-y:transform({copy_command})",
         "--bind",
         f"space:transform({space_command})",
         "--bind",
@@ -1112,6 +1128,7 @@ def prompt(pane: str, state_name: str, trigger_length: int) -> int:
     initial_query = recover_inline_query(pane) if trigger_length else INITIAL_QUERY
     (state / "query").write_text(initial_query)
     (state / "desired").write_text(initial_query)
+    (state / "action").write_text("paste")
     (state / "inline-length").write_text(
         str(inline_erase_count(trigger_length, initial_query))
     )
@@ -1140,7 +1157,8 @@ def prompt(pane: str, state_name: str, trigger_length: int) -> int:
         erase_inline_trigger(pane, state)
         return 0
     query = result.stdout.splitlines()[0] if result.stdout else ""
-    accept(pane, state, query)
+    clipboard = (state / "action").read_text() == "copy"
+    accept(pane, state, query, clipboard=clipboard)
     return 0
 
 
@@ -1195,6 +1213,7 @@ def parse_args() -> argparse.Namespace:
     modes.add_argument("--prompt", nargs=3, metavar=("PANE", "STATE", "TRIGGER_LENGTH"))
     modes.add_argument("--watch", nargs=2, metavar=("PANE", "STATE"))
     modes.add_argument("--accept-action", nargs=3, metavar=("PANE", "STATE", "QUERY"))
+    modes.add_argument("--copy-action", nargs=3, metavar=("PANE", "STATE", "QUERY"))
     modes.add_argument("--space-action", nargs=3, metavar=("PANE", "STATE", "QUERY"))
     modes.add_argument(
         "--move", nargs=4, metavar=("PANE", "STATE", "DIRECTION", "QUERY")
@@ -1213,6 +1232,10 @@ def main() -> int:
     if args.accept_action:
         pane, state, query = args.accept_action
         print(action_for_accept(pane, state, query, space=False))
+        return 0
+    if args.copy_action:
+        pane, state, query = args.copy_action
+        print(action_for_accept(pane, state, query, space=False, clipboard=True))
         return 0
     if args.space_action:
         pane, state, query = args.space_action

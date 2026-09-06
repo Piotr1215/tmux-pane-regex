@@ -1,8 +1,10 @@
 """Exercise navigation against the native selection in an attached tmux client."""
 
+import base64
 import fcntl
 import os
 import pty
+import re
 import select
 import shlex
 import shutil
@@ -93,6 +95,7 @@ class TmuxNavigationTests(unittest.TestCase):
         self.addCleanup(self.close_client)
         self.stop = threading.Event()
         self.popup_ready = threading.Event()
+        self.rendered = bytearray()
         self.reader = threading.Thread(target=self.drain, args=(master,), daemon=True)
         self.reader.start()
         self.addCleanup(self.close_reader)
@@ -117,7 +120,9 @@ class TmuxNavigationTests(unittest.TestCase):
         while not self.stop.is_set():
             if select.select([master], [], [], 0.05)[0]:
                 try:
-                    rendered = (rendered + os.read(master, 65536))[-16384:]
+                    chunk = os.read(master, 65536)
+                    self.rendered.extend(chunk)
+                    rendered = (rendered + chunk)[-16384:]
                     if b"regex>" in rendered:
                         self.popup_ready.set()
                 except OSError:
@@ -304,6 +309,99 @@ class TmuxNavigationTests(unittest.TestCase):
         self.assertEqual(self.selected_text(), match.text)
 
     @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
+    def test_ctrl_y_copies_an_older_match_without_inserting_or_submitting(self):
+        self.open_copy_popup()
+        os.write(self.master, b"python$$")
+        self.wait_for_match("PYTHON newest")
+        os.write(self.master, b"\x1b[A")
+        self.wait_for_match("Python mixed")
+        self.assertEqual(self.selected_text(), "Python mixed")
+
+        os.write(self.master, b"\x19")
+
+        self.wait_for_clipboard("Python mixed")
+
+    @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
+    def test_ctrl_y_copies_a_block_and_removes_only_the_inline_trigger(self):
+        query = r"^spec\p"
+        expected = "spec:\n  replicas: 3\n    nested: true"
+        self.open_copy_popup(inline_query="^sp")
+        os.write(self.master, b"ec\\p")
+        self.wait_for_match(expected, query)
+        self.assertEqual(self.selected_text(), expected)
+
+        os.write(self.master, b"\x19")
+
+        self.wait_for_clipboard(expected)
+
+    @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
+    def test_ctrl_y_with_no_match_keeps_the_picker_open(self):
+        self.open_copy_popup()
+        os.write(self.master, b"no-such-copy-match$$\x19")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if b"No match. Keep typing or press Esc" in self.rendered:
+                self.assertNotIn(b"\x1b]52;", self.rendered)
+                self.assertEqual(
+                    self.tmux(
+                        "display-message", "-p", "-t", self.pane, "#{pane_in_mode}"
+                    ).stdout.strip(),
+                    "1",
+                )
+                os.write(self.master, b"\x1b")
+                return
+            time.sleep(0.02)
+        self.fail("Ctrl+Y did not report the missing match")
+
+    def open_copy_popup(self, inline_query=""):
+        # Selection probes must not copy themselves. load-buffer -w still
+        # explicitly sends the clipboard when set-clipboard is off.
+        self.tmux("set-option", "-s", "set-clipboard", "off")
+        self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+        source = "keep this" + (" ;;" + inline_query if inline_query else "")
+        self.tmux("send-keys", "-l", "-t", self.pane, source)
+        command = shlex.join(
+            [
+                sys.executable,
+                str(self.mod.SCRIPT),
+                "--prompt",
+                self.pane,
+                str(self.state),
+                "3" if inline_query else "0",
+            ]
+        )
+        self.tmux(
+            "run-shell",
+            "-b",
+            shlex.join(["tmux", "display-popup", "-E", "-h", "7", command]),
+        )
+        self.assertTrue(self.popup_ready.wait(timeout=5), "popup did not render")
+
+    def wait_for_clipboard(self, expected):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            payloads = re.findall(rb"\x1b\]52;[^;]*;([^\x07]*)\x07", self.rendered)
+            if payloads:
+                self.assertEqual(base64.b64decode(payloads[-1]).decode(), expected)
+                # A deferred paste would otherwise escape an immediate check.
+                time.sleep(0.3)
+                captured = self.tmux("capture-pane", "-p", "-t", self.pane).stdout
+                self.assertEqual(
+                    next(
+                        line
+                        for line in captured.splitlines()
+                        if line.startswith("DEST>")
+                    ),
+                    "DEST> keep this",
+                )
+                self.assertEqual(
+                    self.tmux("list-panes", "-F", "#{pane_dead}").stdout.strip(), "0"
+                )
+                return
+            time.sleep(0.02)
+        self.fail("Ctrl+Y did not send the selected text to the clipboard")
+
+    @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
     def test_popup_pastes_an_older_case_variant_without_submitting(self):
         self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
         command = shlex.join(
@@ -376,10 +474,12 @@ class TmuxNavigationTests(unittest.TestCase):
             time.sleep(0.02)
         self.fail("Esc did not restore the original destination prompt")
 
-    def wait_for_match(self, text):
+    def wait_for_match(self, text, query="^python$$"):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            match = self.mod.read_match(self.state, "^python$$")
+            with (self.state / "lock").open("w") as lock:
+                fcntl.flock(lock, fcntl.LOCK_SH)
+                match = self.mod.read_match(self.state, query)
             if match is not None and match.text == text:
                 return
             time.sleep(0.02)

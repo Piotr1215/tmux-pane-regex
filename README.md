@@ -1,7 +1,8 @@
 # tmux-pane-regex
 
 Search tmux scrollback with the words you remember, see the exact range in the
-original pane, then paste it at the cursor without submitting it.
+original pane, then paste it at the cursor without submitting it or copy it to
+the clipboard.
 
 The picker stays out of the pane. tmux paints the live match with its native
 search and copy-mode styles, including soft-wrapped and multiline text.
@@ -54,12 +55,12 @@ output:
 | `^price\$` | A literal final dollar sign |
 
 The first `.*` in a landmark range stops at the first viable ending locator.
-Matches are case-insensitive and preserve the original text when pasted.
-A straight apostrophe also matches a smart apostrophe.
+Matches are case-insensitive and preserve the original text when pasted or
+copied. A straight apostrophe also matches a smart apostrophe.
 
-A paste carries the indentation you can see selected, so an indented YAML block
-keeps its shape. Leading whitespace before the selection start is not part of
-the range, and terminal chrome never is: picker bullets such as `•` and `›`,
+A paste or copy carries the indentation you can see selected, so an indented
+YAML block keeps its shape. Leading whitespace before the selection start is not
+part of the range, and terminal chrome never is: picker bullets such as `•` and `›`,
 and the `●` and `⎿` gutter an agent CLI draws down the left of its own output.
 
 `\l` and `\p` name what they take, so `^word\l` reads the same as `^word$` and
@@ -80,6 +81,9 @@ selects just the word. Uppercase letters alone do not change the default.
 - Up selects an older occurrence.
 - Down selects a newer occurrence.
 - Enter or Tab pastes the current selection.
+- Ctrl+Y copies the current selection to the clipboard and closes the picker
+  without inserting it. It also removes the inline `;;^` trigger and recovered
+  query text. With no match, the picker stays open.
 - Space accepts when the query ends in an unescaped `$`.
 - Esc closes the picker without pasting and removes the inline `;;^` trigger,
   including any query text typed into the source prompt before the popup opened.
@@ -88,6 +92,8 @@ Navigation has no match-count limit and searches all history retained by tmux.
 The tmux `history-limit` setting still controls how much scrollback exists.
 
 Pasted text uses tmux bracketed paste. It never submits a command or message.
+Clipboard copying uses tmux's native clipboard escape sequence (OSC 52), so the
+attached terminal must allow clipboard writes. No clipboard helper is required.
 
 ## Configure
 
@@ -114,7 +120,8 @@ The script captures all retained history from the target pane and joins tmux sof
 wraps. Python regex matching chooses the exact source range. The visible
 feedback is then rendered in the source pane with tmux's native search and
 copy-mode selection primitives. Accepting writes the match to a named tmux
-buffer and defers a bracketed paste until the popup has closed.
+buffer and defers a bracketed paste until the popup has closed. Ctrl+Y sends the
+same text to the attached client's clipboard and removes the temporary buffer.
 
 ## Test
 
