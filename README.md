@@ -117,6 +117,15 @@ buffer and defers a bracketed paste until the popup has closed.
 
 ## Test
 
+Renovate updates GitHub Actions and the Ruff CI pin. Minor and patch updates
+automerge through squash PRs without waiting for tests, matching the homelab
+policy. Major updates need Dependency Dashboard approval before a PR opens,
+then manual review and merge.
+
+The Python test version stays manual as a support target. The tmux and fzf
+test builds also stay manual: change each version and its SHA256 checksum
+together, then verify selection and paste in an attached tmux client.
+
 ```sh
 python3 -m unittest discover -s tests
 bats tests/plugin_test.bats

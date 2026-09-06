@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":ignoreUnstable"],
+  "dependencyDashboard": true,
+  "platformAutomerge": false,
+  "automergeType": "pr",
+  "timezone": "Europe/Berlin",
+  "labels": ["dependencies", "renovate"],
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 0,
+  "semanticCommits": "enabled",
+  "commitMessagePrefix": "chore(deps):",
+  "assignees": ["Piotr1215"],
+  "prCreation": "immediate",
+  "rebaseWhen": "behind-base-branch",
+  "packageRules": [
+    {
+      "description": "Auto-merge minor and patch updates with the homelab policy",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "ignoreTests": true
+    },
+    {
+      "description": "Hold back major updates for manual review",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "dependencyDashboardApproval": true,
+      "labels": ["major-update", "needs-review"]
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "semanticCommitType": "ci",
+      "commitMessageTopic": "GitHub Actions"
+    },
+    {
+      "description": "tmux and fzf are native selection test fixtures; update their versions and verified SHA256 checksums together after an attached-client check",
+      "matchPackageNames": ["tmux/tmux", "junegunn/fzf"],
+      "enabled": false
+    },
+    {
+      "description": "The Python test version is a support target, not a latest-release pin",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["python"],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Ruff installed by the test workflow",
+      "managerFilePatterns": ["/^\\.github/workflows/test\\.yml$/"],
+      "matchStrings": ["python -m pip install ruff==(?<currentValue>[\\d.]+)"],
+      "depNameTemplate": "ruff",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    },
+    {
+      "customType": "regex",
+      "description": "Inventory the manually maintained tmux and fzf release archives",
+      "managerFilePatterns": ["/^\\.github/workflows/test\\.yml$/"],
+      "matchStrings": ["https://github\\.com/(?<depName>tmux/tmux|junegunn/fzf)/releases/download/(?<currentValue>[^/]+)/"],
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}
