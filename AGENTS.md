@@ -24,6 +24,9 @@ it. Keep the interaction fast, local, and safe for shells and agent prompts.
 - Direct tmux launches pass `--pane '#{pane_id}'` and start with a fresh `^`.
 - External inline launchers pass their trigger length as the positional argument.
 - Enter and Tab paste the current match. Esc cancels. Nothing submits input.
+- Ctrl+Y copies the same match to the attached client's clipboard and closes the
+  picker without inserting text. It removes the inline trigger like paste does.
+  With no match, the picker stays open.
 - Pane delivery uses a named tmux buffer, bracketed paste, and a deferred
   `run-shell` so multiline text cannot execute while the popup closes.
 - Python chooses the exact source range. Native tmux search and copy-mode
@@ -80,7 +83,8 @@ the query case-sensitive. A straight apostrophe also matches a smart apostrophe.
   socket.
 - Update `README.md` in the same change when a key, option, selector, dependency,
   or visible interaction changes.
-- Never log or send captured pane content outside the local tmux server.
+- Never log captured pane content or send it to a remote service. Only the
+  selected text may leave tmux through an explicit paste or clipboard action.
 
 ## Verification
 
