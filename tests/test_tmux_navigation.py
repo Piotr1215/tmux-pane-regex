@@ -49,6 +49,7 @@ class TmuxNavigationTests(unittest.TestCase):
             "print('tokenVALUE tail')\n"
             "print('token other')\n"
             "print('-option selected -tail')\n"
+            "print('That maps one, two, three, four, five')\n"
             "print('')\n"
             "print('para one')\n"
             "print('para two')\n"
@@ -226,6 +227,20 @@ class TmuxNavigationTests(unittest.TestCase):
             for query in ("^Two$$", "^Wrapped$$", "^Two.*tail$$"):
                 match = self.mod.update(self.pane, str(self.state), query)
                 self.assertEqual(self.selected_text(), match.text, (mode, query))
+
+    def test_count_motions_select_exactly_what_python_chose(self):
+        for mode in ("vi", "emacs"):
+            self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+            self.tmux("setw", "mode-keys", mode)
+            self.tmux("copy-mode", "-t", self.pane)
+            for query, expected in (
+                (r"^That\3f,", "That maps one, two, three,"),
+                (r"^That\3t,", "That maps one, two, three"),
+                (r"^That\f,", "That maps one,"),
+            ):
+                match = self.mod.update(self.pane, str(self.state), query)
+                self.assertEqual(match.text, expected, (mode, query))
+                self.assertEqual(self.selected_text(), expected, (mode, query))
 
     def test_line_form_selects_the_whole_logical_line(self):
         for mode in ("vi", "emacs"):

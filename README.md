@@ -52,6 +52,8 @@ output:
 | `^word\zeend` | Selects `word`, with `end` matched but left out |
 | `^word\l` | The whole logical line holding `word`, vim `V` |
 | `^word\p` | The whole paragraph holding `word`, vim `vip` |
+| `^start\3f,` | Through the third `,`, vim `v3f,` |
+| `^start\3t,` | Up to the third `,`, vim `v3t,` |
 | `^price\$` | A literal final dollar sign |
 
 The first `.*` in a landmark range stops at the first viable ending locator.
@@ -73,6 +75,12 @@ outside them still has to match, it is just not selected. The context before
 `\zs` has no width limit, so `^branch.*\zsunlim` works where a Python lookbehind
 cannot compile at all. Both markers compose with `$$` and `\ss`, which keep
 owning the end of the range.
+
+`\f` and `\t` take a count and one character, the way vim's `f` and `t`
+motions do. `^start\f,` selects through the first comma, `^start\3t,` stops
+just before the third. Every hop is lazy, so the range ends at the nearest
+matching character and never runs on to a later one. The character is taken
+literally: `\2f.` means the second period.
 
 Add `\C` before the locator to make a query case-sensitive: `^\Cpython$$`
 selects from lowercase `python` through its line end, while `\Cpython`
