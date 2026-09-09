@@ -26,6 +26,7 @@ SELECTION_END = r"\ze"
 SELECTION_GROUP = "sel"
 LINE_SUFFIX = r"\L"
 PARAGRAPH_SUFFIX = r"\P"
+MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft])(.)$", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -39,10 +40,34 @@ class Match:
 
 def query_options(query: str) -> tuple[str, re.RegexFlag]:
     """Recognize a case-sensitive override before the first locator."""
+    query = motion_suffix_pattern(query) or query
     marker = 1 if query.startswith("^") else 0
     if query[marker : marker + 2] == r"\C":
         return query[:marker] + query[marker + 2 :], re.RegexFlag(0)
     return query, re.IGNORECASE
+
+
+def motion_suffix_pattern(pattern: str) -> str | None:
+    r"""Expand a vim count motion suffix, ``\3f,`` or ``\3t,``, into markers.
+
+    ``f`` selects through the nth character, ``t`` stops before it. The count
+    defaults to one, so ``\f,`` reads as vim ``vf,``. Every hop is lazy, so the
+    range never runs past the nearest character the way a bare ``.*`` would.
+    """
+    if not pattern.startswith("^"):
+        return None
+    found = MOTION_SUFFIX.search(pattern)
+    if found is None:
+        return None
+    start = pattern[: found.start()] + found.group(1)
+    if len(start) < 2:
+        return None
+    count = max(int(found.group(2) or 1), 1)
+    char = re.escape(found.group(4))
+    if found.group(3) == "f":
+        return f"{start}(.*?{char}){{{count}}}"
+    context = f"(.*?{char}){{{count - 1}}}" if count > 1 else ""
+    return f"{start}{context}.*?{SELECTION_END}{char}"
 
 
 def has_selection_markers(pattern: str) -> bool:

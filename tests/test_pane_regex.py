@@ -234,6 +234,78 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertEqual(newest.start_line, 1)
         self.assertEqual(older.start_line, 0)
 
+    def test_f_motion_selects_through_the_first_character(self):
+        text = "That maps one, two, three, four, five\n"
+
+        match = self.mod.find_latest_match(text, r"^That\f,")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "That maps one,")
+
+    def test_counted_f_motion_selects_through_the_nth_character(self):
+        text = "That maps one, two, three, four, five\n"
+
+        match = self.mod.find_latest_match(text, r"^That\3f,")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "That maps one, two, three,")
+
+    def test_counted_t_motion_stops_before_the_nth_character(self):
+        text = "That maps one, two, three, four, five\n"
+
+        match = self.mod.find_latest_match(text, r"^That\3t,")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "That maps one, two, three")
+
+    def test_t_motion_stops_before_the_first_character(self):
+        text = "That maps one, two, three\n"
+
+        match = self.mod.find_latest_match(text, r"^That\t,")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "That maps one")
+
+    def test_motion_escapes_a_regex_special_character(self):
+        text = "one. two. three. four.\n"
+
+        match = self.mod.find_latest_match(text, r"^one\2f.")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "one. two.")
+
+    def test_motion_crosses_lines_and_stays_lazy(self):
+        text = "old, a, b, c\nstart, one\ntwo, three, four, five\n"
+
+        match = self.mod.find_latest_match(text, r"^start\3f,")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.text, "start, one\ntwo, three,")
+
+    def test_motion_stays_out_of_reach_without_enough_characters(self):
+        text = "start, one, two\n"
+
+        self.assertIsNone(self.mod.find_latest_match(text, r"^start\5f,"))
+
+    def test_escaped_backslash_is_not_a_motion(self):
+        pattern = self.mod.motion_suffix_pattern(r"^start\\3f,")
+
+        self.assertIsNone(pattern)
+
+    def test_motion_expands_to_the_marker_form(self):
+        self.assertEqual(
+            self.mod.motion_suffix_pattern(r"^That\3t,"),
+            r"^That(.*?,){2}.*?\ze,",
+        )
+        self.assertEqual(
+            self.mod.motion_suffix_pattern(r"^That\3f,"), r"^That(.*?,){3}"
+        )
+
+    def test_native_start_pattern_follows_a_motion(self):
+        pattern = self.mod.native_selection_start_pattern(r"^That mapp\3t,")
+
+        self.assertEqual(pattern, "That mapp")
+
     def test_native_highlight_drops_the_context_before_zs(self):
         pattern = self.mod.native_highlight_pattern(r"^tmux-\zspane-regex")
 
