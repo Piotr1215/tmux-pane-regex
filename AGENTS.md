@@ -62,7 +62,9 @@ The documented selector forms are public behavior:
   unfinished `^word` keeps one stop per hit so arrows can walk them.
   Both accept either case.
 - `^start\3f,` selects through the third `,` and `^start\3t,` stops before it,
-  vim `v3f,` and `v3t,`. The count defaults to one. The character is literal.
+  vim `v3f,` and `v3t,`. The count defaults to one. The target is the literal
+  rest of the query, one character or a word, so `^start\2fout` reaches the
+  second `out`. `\t` also stops before the whitespace ahead of its target.
   The form expands to the marker form and shares its highlight and navigation.
 - `^\u` visits every URL newest first and `^word\u` only the URLs containing
   `word`. Trailing sentence punctuation and unbalanced closers stay out. tmux

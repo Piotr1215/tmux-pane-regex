@@ -26,7 +26,7 @@ SELECTION_END = r"\ze"
 SELECTION_GROUP = "sel"
 LINE_SUFFIX = r"\L"
 PARAGRAPH_SUFFIX = r"\P"
-MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft])(.)$", re.DOTALL)
+MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft])(.+)$", re.DOTALL)
 URL_SUFFIX = re.compile(r"\^(.*?(?<!\\)(?:\\\\)*)\\[uU]", re.DOTALL)
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"'`<>]+", re.IGNORECASE)
 URL_TRAILING = ".,:;!?"
@@ -54,11 +54,13 @@ def query_options(query: str) -> tuple[str, re.RegexFlag]:
 
 
 def motion_suffix_pattern(pattern: str) -> str | None:
-    r"""Expand a vim count motion suffix, ``\3f,`` or ``\3t,``, into markers.
+    r"""Expand a vim count motion suffix, ``\3f,`` or ``\2tout``, into markers.
 
-    ``f`` selects through the nth character, ``t`` stops before it. The count
-    defaults to one, so ``\f,`` reads as vim ``vf,``. Every hop is lazy, so the
-    range never runs past the nearest character the way a bare ``.*`` would.
+    ``f`` selects through the nth target, ``t`` stops before it and the space
+    ahead of it. The target is the literal rest of the query, one character as
+    in vim or a whole word. The count defaults to one, so ``\f,`` reads as vim
+    ``vf,``. Every hop is lazy, so the range never runs past the nearest target
+    the way a bare ``.*`` would, and ``(out){2}`` would demand ``outout``.
     """
     if not pattern.startswith("^"):
         return None
@@ -69,11 +71,13 @@ def motion_suffix_pattern(pattern: str) -> str | None:
     if len(start) < 2:
         return None
     count = max(int(found.group(2) or 1), 1)
-    char = re.escape(found.group(4))
+    target = re.escape(found.group(4))
     if found.group(3) == "f":
-        return f"{start}(.*?{char}){{{count}}}"
-    context = f"(.*?{char}){{{count - 1}}}" if count > 1 else ""
-    return f"{start}{context}.*?{SELECTION_END}{char}"
+        return f"{start}(.*?{target}){{{count}}}"
+    context = f"(.*?{target}){{{count - 1}}}" if count > 1 else ""
+    # The native selection ends on the last visible character, so the space
+    # before the target stays out of the paste too.
+    return rf"{start}{context}.*?{SELECTION_END}\s*{target}"
 
 
 def has_selection_markers(pattern: str) -> bool:
@@ -1188,7 +1192,7 @@ def fzf_command(pane: str, state: Path, initial_query: str) -> list[str]:
         "--marker=",
         "--prompt=regex> ",
         r"--header=Up older. Down newer. Enter/Tab paste. Ctrl-Y copy. "
-        r"\ss sentence. \u url.",
+        r"\2fword 2nd word. \u url.",
         f"--query={initial_query}",
         "--print-query",
         "--bind",

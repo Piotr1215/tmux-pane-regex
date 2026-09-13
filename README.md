@@ -43,6 +43,9 @@ output:
 
 | Query | Selection |
 | --- | --- |
+| `^start\3f,` | Through the third `,`, vim `v3f,` |
+| `^start\3t,` | Up to the third `,`, vim `v3t,` |
+| `^start\2fout` | Through the second `out` |
 | `^word$` | Latest logical line containing `word` |
 | `^start.*end` | From `start` downward through the first `end` |
 | `^start$$` | From `start` through that logical line's last visible character |
@@ -52,8 +55,6 @@ output:
 | `^word\zeend` | Selects `word`, with `end` matched but left out |
 | `^word\l` | The whole logical line holding `word`, vim `V` |
 | `^word\p` | The whole paragraph holding `word`, vim `vip` |
-| `^start\3f,` | Through the third `,`, vim `v3f,` |
-| `^start\3t,` | Up to the third `,`, vim `v3t,` |
 | `^\u` | The newest URL, Up for older ones |
 | `^word\u` | The newest URL holding `word` |
 | `^price\$` | A literal final dollar sign |
@@ -78,11 +79,14 @@ outside them still has to match, it is just not selected. The context before
 cannot compile at all. Both markers compose with `$$` and `\ss`, which keep
 owning the end of the range.
 
-`\f` and `\t` take a count and one character, the way vim's `f` and `t`
-motions do. `^start\f,` selects through the first comma, `^start\3t,` stops
-just before the third. Every hop is lazy, so the range ends at the nearest
-matching character and never runs on to a later one. The character is taken
-literally: `\2f.` means the second period.
+`\f` and `\t` take a count and a target, the way vim's `f` and `t` motions do.
+`^start\f,` selects through the first comma, `^start\3t,` stops just before the
+third. The target is the rest of the query, so it can be a whole word:
+`^change\2fout` selects through the second `out`, which `^change.*(out){2}`
+cannot, since `{2}` asks for `outout`. Every hop is lazy, so the range ends at
+the nearest target and never runs on to a later one. The target is taken
+literally: `\2f.` means the second period. `\t` also leaves out the space
+before its target, so the selection ends on a visible character.
 
 `\u` selects a URL. `^\u` visits every URL in scrollback, newest first, and
 `^github\u` keeps only the ones containing `github`. A URL is any `scheme://`

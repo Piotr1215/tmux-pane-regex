@@ -266,6 +266,33 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.text, "That maps one")
 
+    def test_counted_f_motion_selects_through_the_nth_word(self):
+        text = (
+            "that change, so it works without reloading\n"
+            "and stays uncommitted without doubt\n"
+        )
+
+        match = self.mod.find_latest_match(text, r"^change\2fout")
+
+        self.assertEqual(
+            match.text,
+            "change, so it works without reloading\nand stays uncommitted without",
+        )
+
+    def test_t_motion_stops_before_a_word_and_the_space_ahead_of_it(self):
+        text = "Two different things with the same name, and one of them\n"
+
+        match = self.mod.find_latest_match(text, r"^Two\2tthe")
+
+        self.assertEqual(
+            match.text, "Two different things with the same name, and one of"
+        )
+
+    def test_t_motion_leaves_space_before_a_character_out(self):
+        match = self.mod.find_latest_match("key = value ; next\n", r"^key\t;")
+
+        self.assertEqual(match.text, "key = value")
+
     def test_motion_escapes_a_regex_special_character(self):
         text = "one. two. three. four.\n"
 
@@ -295,10 +322,13 @@ class PaneRegexMatchTests(unittest.TestCase):
     def test_motion_expands_to_the_marker_form(self):
         self.assertEqual(
             self.mod.motion_suffix_pattern(r"^That\3t,"),
-            r"^That(.*?,){2}.*?\ze,",
+            r"^That(.*?,){2}.*?\ze\s*,",
         )
         self.assertEqual(
             self.mod.motion_suffix_pattern(r"^That\3f,"), r"^That(.*?,){3}"
+        )
+        self.assertEqual(
+            self.mod.motion_suffix_pattern(r"^change\2fo.t"), r"^change(.*?o\.t){2}"
         )
 
     def test_native_start_pattern_follows_a_motion(self):

@@ -240,6 +240,14 @@ class TmuxNavigationTests(unittest.TestCase):
                 (r"^That\3f,", "That maps one, two, three,"),
                 (r"^That\3t,", "That maps one, two, three"),
                 (r"^That\f,", "That maps one,"),
+                (
+                    r"^Two\2fthe",
+                    "Two different things with the same name, and only one of the",
+                ),
+                (
+                    r"^Two\2tthe",
+                    "Two different things with the same name, and only one of",
+                ),
             ):
                 match = self.mod.update(self.pane, str(self.state), query)
                 self.assertEqual(match.text, expected, (mode, query))
