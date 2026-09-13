@@ -54,6 +54,8 @@ output:
 | `^word\p` | The whole paragraph holding `word`, vim `vip` |
 | `^start\3f,` | Through the third `,`, vim `v3f,` |
 | `^start\3t,` | Up to the third `,`, vim `v3t,` |
+| `^\u` | The newest URL, Up for older ones |
+| `^word\u` | The newest URL holding `word` |
 | `^price\$` | A literal final dollar sign |
 
 The first `.*` in a landmark range stops at the first viable ending locator.
@@ -81,6 +83,13 @@ motions do. `^start\f,` selects through the first comma, `^start\3t,` stops
 just before the third. Every hop is lazy, so the range ends at the nearest
 matching character and never runs on to a later one. The character is taken
 literally: `\2f.` means the second period.
+
+`\u` selects a URL. `^\u` visits every URL in scrollback, newest first, and
+`^github\u` keeps only the ones containing `github`. A URL is any `scheme://`
+run up to whitespace, a quote, a backtick, or an angle bracket. Sentence
+punctuation after it and a closing bracket it never opened are left out, so
+`(see https://example.com/a_(b)).` selects `https://example.com/a_(b)`.
+Press Ctrl+Y to copy it or Enter to paste it. `\U` reads the same.
 
 Add `\C` before the locator to make a query case-sensitive: `^\Cpython$$`
 selects from lowercase `python` through its line end, while `\Cpython`

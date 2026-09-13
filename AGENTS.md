@@ -64,6 +64,10 @@ The documented selector forms are public behavior:
 - `^start\3f,` selects through the third `,` and `^start\3t,` stops before it,
   vim `v3f,` and `v3t,`. The count defaults to one. The character is literal.
   The form expands to the marker form and shares its highlight and navigation.
+- `^\u` visits every URL newest first and `^word\u` only the URLs containing
+  `word`. Trailing sentence punctuation and unbalanced closers stay out. tmux
+  searches for the exact URL Python chose, then selects the rest of it with one
+  forward text search, so soft wraps hold in both key modes. Either case works.
 - `\zs` and `\ze` mark where the selection starts and ends. Text outside them
   must match and stays out of the selection. They translate to one named group,
   never to a lookaround, so the context carries no fixed-width limit.

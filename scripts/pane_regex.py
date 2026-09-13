@@ -27,6 +27,12 @@ SELECTION_GROUP = "sel"
 LINE_SUFFIX = r"\L"
 PARAGRAPH_SUFFIX = r"\P"
 MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft])(.)$", re.DOTALL)
+URL_SUFFIX = re.compile(r"\^(.*?(?<!\\)(?:\\\\)*)\\[uU]", re.DOTALL)
+URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"'`<>]+", re.IGNORECASE)
+URL_TRAILING = ".,:;!?"
+URL_CLOSERS = {")": "(", "]": "[", "}": "{"}
+# Two line-anchored groups in a row can never match, whatever the case folding.
+IMPOSSIBLE_SEARCH = "(^A$)(^B$)"
 
 
 @dataclass(frozen=True)
@@ -235,6 +241,41 @@ def paragraph_suffix_start(pattern: str) -> str | None:
     return block_start_pattern(pattern, PARAGRAPH_SUFFIX)
 
 
+def url_suffix_locator(pattern: str) -> str | None:
+    r"""Return the locator in a ``^word\u`` form, or an empty one for ``^\u``."""
+    found = URL_SUFFIX.fullmatch(pattern)
+    return None if found is None else found.group(1)
+
+
+def selects_url(query: str) -> bool:
+    return url_suffix_locator(query_options(query)[0]) is not None
+
+
+def trim_url(url: str) -> str:
+    """Drop the sentence punctuation and unbalanced closers prose puts after a URL."""
+    while url and (
+        url[-1] in URL_TRAILING
+        or (
+            url[-1] in URL_CLOSERS
+            and url.count(url[-1]) > url.count(URL_CLOSERS[url[-1]])
+        )
+    ):
+        url = url[:-1]
+    return url
+
+
+def url_matches(clean: str, locator: str, flags: re.RegexFlag) -> list[Match]:
+    """Return every URL holding the locator, newest first."""
+    wanted = re.compile(prose_friendly_pattern(locator), flags) if locator else None
+    matches = []
+    for found in reversed(list(URL.finditer(clean))):
+        text = trim_url(found.group(0))
+        if text.endswith("://") or (wanted is not None and not wanted.search(text)):
+            continue
+        matches.append(offsets_result(clean, found.start(), found.start() + len(text)))
+    return matches
+
+
 def paragraph_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
     """Grow an offset range to the blank-line boundaries around it."""
     head = clean.rfind("\n\n", 0, start)
@@ -393,6 +434,10 @@ def clean_matches_latest(clean: str, pattern: str) -> list[Match]:
     pattern, flags = query_options(pattern)
     if not pattern:
         return []
+
+    url_locator = url_suffix_locator(pattern)
+    if url_locator is not None:
+        return url_matches(clean, url_locator, flags)
 
     paragraph_start = paragraph_suffix_start(pattern)
     if paragraph_start is not None:
@@ -693,6 +738,11 @@ def marker_highlight_pattern(query: str, match: Match | None) -> str:
 def native_highlight_pattern(query: str, match: Match | None = None) -> str:
     """Choose the stable single-line locator for tmux's native highlighter."""
     query, _ = query_options(query)
+    if url_suffix_locator(query) is not None:
+        # tmux knows no URL shape, so it searches for the one Python chose.
+        if match is None:
+            return IMPOSSIBLE_SEARCH
+        return prose_friendly_pattern(ere_literal(match.text))
     query = block_highlight_query(query) or query
     if has_selection_markers(query):
         return marker_highlight_pattern(query, match)
@@ -732,6 +782,8 @@ def native_selection_start_pattern(
 ) -> str | None:
     """Return the first locator when the exact match needs a copy selection."""
     query, _ = query_options(query)
+    if url_suffix_locator(query) is not None:
+        return None
     if paragraph_suffix_start(query) is not None:
         # The paragraph opens above the locator, so the search has to start
         # from the text itself. Its first word is the only anchor there is.
@@ -781,9 +833,10 @@ def selection_end_fragment(match: Match) -> tuple[str, int] | None:
 def native_search_occurrence(text: str, query: str, match: Match) -> int | None:
     """Map the stored source offset to tmux's backward-search occurrence."""
     pattern = native_selection_start_pattern(query, match)
-    if pattern is None and selects_whole_line(query):
+    if pattern is None and (selects_whole_line(query) or selects_url(query)):
         # A block form reports one entry per line, while tmux walks every hit
-        # on it. Counting the hits keeps the two in step.
+        # on it. A URL search also hits the longer URLs it is a prefix of.
+        # Counting the hits keeps the two in step.
         pattern = native_highlight_pattern(query, match)
     if pattern is None:
         return None
@@ -844,9 +897,13 @@ def show_match(
     )
     whole_line = match is not None and selects_whole_line(query)
     selection_end = selection_end_fragment(match) if selection_start and match else None
+    if match is not None and selects_url(query):
+        # A URL is one unbroken token, so everything after its first character
+        # is an ending fragment exactly one search away, soft wraps included.
+        selection_end = (match.text[1:], 1)
     search_pattern = (
         selection_start
-        if selection_end is not None
+        if selection_start and selection_end is not None
         else native_highlight_pattern(query, match)
     )
     _, flags = query_options(query)
@@ -856,7 +913,7 @@ def show_match(
     else:
         # tmux has no case-sensitive switch. An impossible uppercase branch
         # disables smart case without adding any possible search matches.
-        search_pattern = f"({search_pattern})|(^A$)(^B$)"
+        search_pattern = f"({search_pattern})|{IMPOSSIBLE_SEARCH}"
     command = [
         "send-keys",
         "-X",
@@ -1130,7 +1187,8 @@ def fzf_command(pane: str, state: Path, initial_query: str) -> list[str]:
         "--pointer=",
         "--marker=",
         "--prompt=regex> ",
-        r"--header=Up older. Down newer. Enter/Tab paste. Ctrl-Y copy. \ss sentence.",
+        r"--header=Up older. Down newer. Enter/Tab paste. Ctrl-Y copy. "
+        r"\ss sentence. \u url.",
         f"--query={initial_query}",
         "--print-query",
         "--bind",

@@ -465,6 +465,60 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertEqual(lower.text, "alpha one\nalpha two")
         self.assertEqual(upper.text, lower.text)
 
+    def test_url_suffix_visits_every_url_newest_first(self):
+        text = "old https://example.com/old\nsee https://example.com/new now\n"
+
+        matches = self.mod.find_matches_latest(text, r"^\u")
+
+        self.assertEqual(
+            [match.text for match in matches],
+            ["https://example.com/new", "https://example.com/old"],
+        )
+
+    def test_url_suffix_keeps_only_urls_holding_the_locator(self):
+        text = (
+            "https://github.com/a/b/pull/1\n"
+            "github mentioned beside https://example.com/pull\n"
+        )
+
+        matches = self.mod.find_matches_latest(text, r"^github\u")
+
+        self.assertEqual(
+            [match.text for match in matches], ["https://github.com/a/b/pull/1"]
+        )
+
+    def test_url_leaves_out_the_punctuation_around_it(self):
+        cases = {
+            "docs at https://example.com/docs.": "https://example.com/docs",
+            "(see https://example.com/a_(b))": "https://example.com/a_(b)",
+            "[link](https://example.com/x), then": "https://example.com/x",
+            "run `git clone ssh://git@host/repo.git`": "ssh://git@host/repo.git",
+            'href="https://example.com/q?a=1&b=2"': "https://example.com/q?a=1&b=2",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                match = self.mod.find_latest_match(text, r"^\u")
+
+                self.assertEqual(match.text, expected)
+
+    def test_bare_scheme_is_not_a_url(self):
+        self.assertIsNone(self.mod.find_latest_match("scheme https://.", r"^\u"))
+
+    def test_url_suffix_reads_either_case_and_respects_escaped_backslashes(self):
+        self.assertEqual(self.mod.url_suffix_locator(r"^\u"), "")
+        self.assertEqual(self.mod.url_suffix_locator(r"^git\U"), "git")
+        self.assertIsNone(self.mod.url_suffix_locator(r"^path\\u"))
+        self.assertEqual(self.mod.url_suffix_locator(r"^path\\\u"), r"path\\")
+
+    def test_url_search_is_the_url_python_chose(self):
+        match = self.mod.Match("https://example.com/a?b=(1)", 0, 0)
+
+        self.assertEqual(
+            self.mod.native_highlight_pattern(r"^example\u", match),
+            r"https://example\.com/a\?b=\(1\)",
+        )
+        self.assertIsNone(self.mod.native_selection_start_pattern(r"^example\u", match))
+
     def test_search_occurrence_anchors_on_the_earliest_hit_in_range(self):
         text = "beta one\nbeta two\n"
         match = self.mod.find_latest_match(text, r"^beta\p")

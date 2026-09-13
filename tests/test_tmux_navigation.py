@@ -62,6 +62,9 @@ class TmuxNavigationTests(unittest.TestCase):
             "print('')\n"
             "print('beta then beta again')\n"
             "print('')\n"
+            "print('docs at https://example.com/docs.')\n"
+            "print('see (https://example.com/docs/a_(b)) now')\n"
+            "print('long https://example.com/' + 'segment/' * 14 + 'end here')\n"
             "input('DEST> ')\n"
         )
         self.pane = self.tmux(
@@ -311,6 +314,30 @@ class TmuxNavigationTests(unittest.TestCase):
             self.assertEqual(match.text, expected, query)
             self.assertEqual(self.selected_text(), match.text, query)
 
+    def test_url_suffix_selects_exactly_what_python_chose(self):
+        wrapped = "https://example.com/" + "segment/" * 14 + "end"
+        cases = {
+            r"^\u": [
+                wrapped,
+                "https://example.com/docs/a_(b)",
+                "https://example.com/docs",
+            ],
+            r"^docs\u": ["https://example.com/docs/a_(b)", "https://example.com/docs"],
+        }
+        for mode in ("vi", "emacs"):
+            self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+            self.tmux("setw", "mode-keys", mode)
+            self.tmux("copy-mode", "-t", self.pane)
+            for query, expected in cases.items():
+                self.mod.write_match(self.state, query, None)
+                (self.state / "occurrence").write_text("0")
+                self.mod.update(self.pane, str(self.state), query)
+                for text in expected:
+                    match = self.mod.read_match(self.state, query)
+                    self.assertEqual(match.text, text, (mode, query))
+                    self.assertEqual(self.selected_text(), text, (mode, query))
+                    self.mod.move_selection(self.pane, str(self.state), "older", query)
+
     def test_case_folding_keeps_negated_regex_escapes(self):
         match = self.mod.update(self.pane, str(self.state), r"^TOKEN\S+$$")
 
@@ -348,6 +375,19 @@ class TmuxNavigationTests(unittest.TestCase):
         os.write(self.master, b"\x19")
 
         self.wait_for_clipboard(expected)
+
+    @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
+    def test_ctrl_y_copies_an_older_url_without_inserting_it(self):
+        query = r"^\u"
+        self.open_copy_popup()
+        os.write(self.master, b"\\u")
+        self.wait_for_match("https://example.com/" + "segment/" * 14 + "end", query)
+        os.write(self.master, b"\x1b[A")
+        self.wait_for_match("https://example.com/docs/a_(b)", query)
+
+        os.write(self.master, b"\x19")
+
+        self.wait_for_clipboard("https://example.com/docs/a_(b)")
 
     @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
     def test_ctrl_y_with_no_match_keeps_the_picker_open(self):
