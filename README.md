@@ -46,6 +46,7 @@ output:
 | `^start\3f,` | Through the third `,`, vim `v3f,` |
 | `^start\3t,` | Up to the third `,`, vim `v3t,` |
 | `^start\2fout` | Through the second `out` |
+| `^start.*stop\2` | Through the second `stop`, `\2t` up to it |
 | `^word$` | Latest logical line containing `word` |
 | `^start.*end` | From `start` downward through the first `end` |
 | `^start$$` | From `start` through that logical line's last visible character |
@@ -87,6 +88,11 @@ cannot, since `{2}` asks for `outout`. Every hop is lazy, so the range ends at
 the nearest target and never runs on to a later one. The target is taken
 literally: `\2f.` means the second period. `\t` also leaves out the space
 before its target, so the selection ends on a visible character.
+
+A count can also come last. `^start.*stop` already ends at the first `stop`, so
+`^start.*stop\2` ends at the second and `^start.*stop\2t` just before it.
+Changing the count is one backspace. The count repeats only the hop after the
+last `.*`, and that landmark stays a regex, so `^start.*(stop|end)\3` works.
 
 `\u` selects a URL. `^\u` visits every URL in scrollback, newest first, and
 `^github\u` keeps only the ones containing `github`. A URL is any `scheme://`

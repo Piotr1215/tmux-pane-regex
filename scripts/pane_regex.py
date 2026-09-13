@@ -27,6 +27,8 @@ SELECTION_GROUP = "sel"
 LINE_SUFFIX = r"\L"
 PARAGRAPH_SUFFIX = r"\P"
 MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft])(.+)$", re.DOTALL)
+COUNT_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft]?)$")
+LANDMARK_HOP = re.compile(r"(?<!\\)\.\*\??")
 URL_SUFFIX = re.compile(r"\^(.*?(?<!\\)(?:\\\\)*)\\[uU]", re.DOTALL)
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"'`<>]+", re.IGNORECASE)
 URL_TRAILING = ".,:;!?"
@@ -66,13 +68,43 @@ def motion_suffix_pattern(pattern: str) -> str | None:
         return None
     found = MOTION_SUFFIX.search(pattern)
     if found is None:
-        return None
+        return trailing_count_pattern(pattern)
     start = pattern[: found.start()] + found.group(1)
+    return motion_pattern(
+        start, found.group(2), found.group(3), re.escape(found.group(4))
+    )
+
+
+def trailing_count_pattern(pattern: str) -> str | None:
+    r"""Expand ``^start.*stop\2`` into a range through the second ``stop``.
+
+    The bare range already ends at the first ``stop``, so a count typed last
+    only repeats the final lazy hop and fixing it is one backspace. ``\2t``
+    stops before it. The landmark stays a regex, grouped so an alternation
+    cannot escape the hop.
+    """
+    found = COUNT_SUFFIX.search(pattern)
+    if found is None or not (found.group(2) or found.group(3)):
+        return None
+    body = pattern[: found.start()] + found.group(1)
+    hops = list(LANDMARK_HOP.finditer(body))
+    if not hops or hops[-1].end() == len(body):
+        return None
+    last = hops[-1]
+    return motion_pattern(
+        body[: last.start()],
+        found.group(2),
+        found.group(3),
+        f"({body[last.end() :]})",
+    )
+
+
+def motion_pattern(start: str, count: str, kind: str, target: str) -> str | None:
+    """Build the lazy hops for an ``f`` or ``t`` motion towards a target."""
     if len(start) < 2:
         return None
-    count = max(int(found.group(2) or 1), 1)
-    target = re.escape(found.group(4))
-    if found.group(3) == "f":
+    count = max(int(count or 1), 1)
+    if kind != "t":
         return f"{start}(.*?{target}){{{count}}}"
     context = f"(.*?{target}){{{count - 1}}}" if count > 1 else ""
     # The native selection ends on the last visible character, so the space
@@ -1192,7 +1224,7 @@ def fzf_command(pane: str, state: Path, initial_query: str) -> list[str]:
         "--marker=",
         "--prompt=regex> ",
         r"--header=Up older. Down newer. Enter/Tab paste. Ctrl-Y copy. "
-        r"\2fword 2nd word. \u url.",
+        r".*word\2 2nd word. \u url.",
         f"--query={initial_query}",
         "--print-query",
         "--bind",

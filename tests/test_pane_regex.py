@@ -293,6 +293,41 @@ class PaneRegexMatchTests(unittest.TestCase):
 
         self.assertEqual(match.text, "key = value")
 
+    def test_trailing_count_repeats_the_last_landmark_hop(self):
+        text = (
+            "that change, so it works without reloading\n"
+            "and stays uncommitted without doubt\n"
+        )
+        expected = (
+            "change, so it works without reloading\nand stays uncommitted without"
+        )
+        for query in (r"^change.*out\2", r"^change.*out\2f"):
+            with self.subTest(query=query):
+                self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
+
+    def test_trailing_count_with_t_stops_before_the_nth_landmark(self):
+        text = "Two different things with the same name, and one of them\n"
+
+        match = self.mod.find_latest_match(text, r"^Two.*the\2t")
+
+        self.assertEqual(
+            match.text, "Two different things with the same name, and one of"
+        )
+
+    def test_trailing_count_keeps_a_regex_landmark_whole(self):
+        self.assertEqual(
+            self.mod.motion_suffix_pattern(r"^start.*b|c\3"), r"^start(.*?(b|c)){3}"
+        )
+        self.assertEqual(
+            self.mod.motion_suffix_pattern(r"^a.*b.*?c\2t"),
+            r"^a.*b(.*?(c)){1}.*?\ze\s*(c)",
+        )
+
+    def test_trailing_count_needs_a_landmark_before_it(self):
+        for query in (r"^start\2", r"^(a).*\1", r"^start.*stop\\2", r"^start.*stop"):
+            with self.subTest(query=query):
+                self.assertIsNone(self.mod.motion_suffix_pattern(query))
+
     def test_motion_escapes_a_regex_special_character(self):
         text = "one. two. three. four.\n"
 

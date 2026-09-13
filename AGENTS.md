@@ -65,6 +65,10 @@ The documented selector forms are public behavior:
   vim `v3f,` and `v3t,`. The count defaults to one. The target is the literal
   rest of the query, one character or a word, so `^start\2fout` reaches the
   second `out`. `\t` also stops before the whitespace ahead of its target.
+- `^start.*stop\2` repeats the hop after the last `.*` twice, and `\2t` stops
+  before the second `stop`. The bare range is the implicit `\1`. The landmark
+  stays a regex, wrapped in a group. Without a `.*` before it, a trailing `\2`
+  stays a regex backreference.
   The form expands to the marker form and shares its highlight and navigation.
 - `^\u` visits every URL newest first and `^word\u` only the URLs containing
   `word`. Trailing sentence punctuation and unbalanced closers stay out. tmux
