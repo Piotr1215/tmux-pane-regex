@@ -113,6 +113,10 @@ selects just the word. Uppercase letters alone do not change the default.
 The picker header lists every shortcut, so the table above is always one
 keypress away.
 
+The current match is selected exactly, and every other match is highlighted, so
+you see where Up and Down will land. A match that spans lines shows its first
+line.
+
 - Up selects an older occurrence.
 - Down selects a newer occurrence.
 - Enter or Tab pastes the current selection.

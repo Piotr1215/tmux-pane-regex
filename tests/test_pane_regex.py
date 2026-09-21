@@ -659,7 +659,7 @@ class PaneRegexMatchTests(unittest.TestCase):
 
         pattern = self.mod.native_highlight_pattern(r"^\u", match, text=text)
 
-        self.assertLessEqual(len(pattern), self.mod.URL_SEARCH_BUDGET + 2)
+        self.assertLessEqual(len(pattern), self.mod.SEARCH_BUDGET + 2)
         named = sorted(int(index) for index in re.findall(r"/(\d{4})/", pattern))
         # Occurrence 100 is the URL numbered 99, and its neighbours fill the
         # budget evenly on both sides.
@@ -675,6 +675,67 @@ class PaneRegexMatchTests(unittest.TestCase):
             self.assertEqual(
                 self.mod.native_search_occurrence(text, r"^\u", match), occurrence
             )
+
+    def test_one_word_match_ends_one_search_past_its_first_character(self):
+        self.assertEqual(
+            self.mod.selection_end_fragment(self.mod.Match("(>4m)", 0, 0)),
+            (">4m)", 1),
+        )
+        self.assertEqual(
+            self.mod.selection_end_fragment(self.mod.Match("x", 0, 0)), ("", 0)
+        )
+
+    def test_selection_opening_on_an_operator_anchors_on_the_match(self):
+        text = 'run "$PANE" and "second one" here\n'
+        query = r'^"\zs.*\ze"'
+        match = self.mod.find_latest_match(text, query)
+
+        self.assertEqual(match.text, "second one")
+        self.assertEqual(
+            self.mod.native_selection_start_pattern(query, match), "second"
+        )
+        self.assertEqual(self.mod.native_highlight_pattern(query, match), "second")
+        # With nothing chosen, a bare ``.*`` must not paint every line.
+        self.assertEqual(
+            self.mod.native_highlight_pattern(query), self.mod.IMPOSSIBLE_SEARCH
+        )
+
+    def test_hint_search_names_every_match_with_its_context(self):
+        text = 'run "$PANE" and "second one" here\n"alpha"\n'
+        query = r'^"\zs\S+\ze"'
+        match = self.mod.find_latest_match(text, query)
+
+        self.assertEqual((match.text, match.hint), ("alpha", '"alpha"'))
+        # Context stays in, or a short match like ``x`` would paint every x.
+        self.assertEqual(
+            self.mod.hint_search_pattern(text, query, match), r'("\$PANE"|"alpha")'
+        )
+
+    def test_hint_for_a_multiline_match_is_its_first_line(self):
+        text = "range starts here\n  and ends there\ntail\n"
+        match = self.mod.find_latest_match(text, r"^range.*there")
+
+        self.assertEqual(match.text, "range starts here\n  and ends there")
+        self.assertEqual(
+            self.mod.hint_search_pattern(text, r"^range.*there", match),
+            "range starts here",
+        )
+
+    def test_selection_ends_with_a_search_that_paints_every_match(self):
+        text = "call (one) and (two words) done\n"
+        match = self.mod.find_latest_match(text, r"^\(.*\)")
+        with (
+            mock.patch.object(self.mod, "tmux") as tmux,
+            mock.patch.object(self.mod, "native_search_occurrence", return_value=0),
+        ):
+            tmux.return_value.stdout = "vi\n"
+            self.mod.show_match("%1", r"^\(.*\)", match, text=text)
+
+        command = tmux.call_args.args
+        self.assertEqual(
+            command[-3:], ("search-backward", "--", r"(\(two words\)|\(one\))")
+        )
+        self.assertLess(command.index("stop-selection"), len(command) - 3)
 
     def test_search_occurrence_anchors_on_the_earliest_hit_in_range(self):
         text = "beta one\nbeta two\n"

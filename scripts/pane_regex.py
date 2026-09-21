@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve()
@@ -34,8 +35,8 @@ URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"'`<>]+", re.IGNORECASE)
 URL_TRAILING = ".,:;!?"
 URL_CLOSERS = {")": "(", "]": "[", "}": "{"}
 # tmux refuses a command near 16 KB, and the repeated search-again steps share
-# that room, so the URL search names only the URLs nearest the chosen one.
-URL_SEARCH_BUDGET = 4096
+# that room, so a search names only the matches nearest the chosen one.
+SEARCH_BUDGET = 4096
 # Two line-anchored groups in a row can never match, whatever the case folding.
 IMPOSSIBLE_SEARCH = "(^A$)(^B$)"
 # Every shortcut, so the picker shows what it can do. Three lines fill the
@@ -57,6 +58,9 @@ class Match:
     end_line: int
     start_offset: int = 0
     end_offset: int = 0
+    # The first line of the whole regex match, ``\zs`` and ``\ze`` context
+    # included, which is what tmux can find and paint for this match.
+    hint: str = ""
 
 
 def query_options(query: str) -> tuple[str, re.RegexFlag]:
@@ -363,17 +367,44 @@ def url_search_pattern(
         url_matches(clean, locator, flags),
         key=lambda url: abs(url.start_offset - match.start_offset),
     )
+    return literal_alternation([match.text, *(url.text for url in nearest)])
+
+
+def literal_alternation(texts: list[str]) -> str:
+    """Join the leading texts that fit the tmux budget, the longest first."""
     literals: list[str] = []
     used = 0
-    for text in dict.fromkeys([match.text, *(url.text for url in nearest)]):
+    for text in dict.fromkeys(texts):
         literal = prose_friendly_pattern(ere_literal(text))
         used += len(literal.encode()) + 1
-        if literals and used > URL_SEARCH_BUDGET:
+        if literals and used > SEARCH_BUDGET:
             break
         literals.append(literal)
     if len(literals) == 1:
         return literals[0]
     return "(" + "|".join(sorted(literals, key=len, reverse=True)) + ")"
+
+
+def match_hint(match: Match) -> str:
+    """Return the one line of a match that tmux can find and paint."""
+    return (match.hint or match.text.split("\n", 1)[0]).strip()
+
+
+def hint_search_pattern(text: str, query: str, match: Match) -> str | None:
+    """Name every match so tmux paints the others beside the selection.
+
+    tmux cannot run the query itself. Its search knows no lazy hop or marker
+    and never spans a line, so each match is a literal of its first line.
+    """
+    try:
+        matches = find_matches_latest(text, query)
+    except re.error:
+        return None
+    nearest = sorted(
+        matches, key=lambda other: abs(other.start_offset - match.start_offset)
+    )
+    hints = [hint for hint in map(match_hint, [match, *nearest]) if hint]
+    return literal_alternation(hints) if hints else None
 
 
 def paragraph_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
@@ -494,7 +525,9 @@ def offsets_result(clean: str, start: int, end: int) -> Match:
 
 def regex_match_result(clean: str, found: re.Match[str]) -> Match:
     start, end = selection_span(found)
-    return offsets_result(clean, start, end)
+    return replace(
+        offsets_result(clean, start, end), hint=found.group(0).split("\n", 1)[0]
+    )
 
 
 def line_start_offsets(lines: list[str]) -> list[int]:
@@ -521,12 +554,18 @@ def block_matches(clean: str, locator: str, bounds, flags: re.RegexFlag) -> list
 
 def find_matches_latest(text: str, pattern: str) -> list[Match]:
     """Return every viable expansion from newest source position to oldest."""
+    return list(cached_matches_latest(text, pattern))
+
+
+@lru_cache(maxsize=4)
+def cached_matches_latest(text: str, pattern: str) -> tuple[Match, ...]:
+    """Scan once per capture. One refresh asks for the same list three times."""
     lines, indents = scrollback_lines(text)
     whole_line = selects_whole_line(pattern)
-    return [
+    return tuple(
         restore_indent(match, indents, whole_line)
         for match in clean_matches_latest("\n".join(lines), pattern)
-    ]
+    )
 
 
 def clean_matches_latest(clean: str, pattern: str) -> list[Match]:
@@ -811,6 +850,16 @@ def native_ignore_case_pattern(pattern: str) -> str:
     )
 
 
+def match_anchor(match: Match | None) -> str | None:
+    """Return the first word of the match as a literal tmux can search for.
+
+    A selection that opens on a regex operator, as in ``"\\zs.*\\ze"``, has no
+    typed word to find, so the text Python chose is the only anchor there is.
+    """
+    first = re.match(r"[ \t]*\S+", match.text) if match is not None else None
+    return prose_friendly_pattern(ere_literal(first.group(0))) if first else None
+
+
 def marker_highlight_pattern(query: str, match: Match | None) -> str:
     r"""Build the tmux locator for a query that carries selection markers.
 
@@ -832,6 +881,9 @@ def marker_highlight_pattern(query: str, match: Match | None) -> str:
         if prefix:
             start = prose_friendly_pattern(ere_literal(prefix))
             return f"({start}.*[^[:space:]]|{start})"
+    if not leading_literal(body):
+        # A bare ``.*`` would paint every line, so search for the match itself.
+        return match_anchor(match) or IMPOSSIBLE_SEARCH
     return prose_friendly_pattern(body)
 
 
@@ -896,7 +948,9 @@ def native_selection_start_pattern(
     if SELECTION_START in query:
         body = strip_selection_markers(query.partition(SELECTION_START)[2])
         start = leading_literal(body)
-        return prose_friendly_pattern(ere_literal(start)) if start else None
+        if not start:
+            return match_anchor(match)
+        return prose_friendly_pattern(ere_literal(start))
     if anchored_line_prefix(query) is not None:
         return None
     start = sentence_start_pattern(query)
@@ -923,6 +977,11 @@ def selection_end_fragment(match: Match) -> tuple[str, int] | None:
     if found is None:
         return None
     fragment = found.group(0)
+    if found.start() == 0:
+        # A one-word match has no later word to search for. The forward search
+        # starts past the cursor, so the rest of the word is one search away,
+        # and a single character needs no search at all.
+        return fragment[1:], min(len(fragment) - 1, 1)
     searches = sum(
         found.start() > 0
         for found in re.finditer(re.escape(fragment), text, re.IGNORECASE)
@@ -986,6 +1045,17 @@ def selects_whole_line(query: str) -> bool:
     return has_terminal_anchor(query) and anchored_line_prefix(query) is not None
 
 
+def native_case_pattern(query: str, pattern: str) -> str:
+    """Make a tmux search fold case exactly when the query does."""
+    _, flags = query_options(query)
+    if flags & re.IGNORECASE:
+        # tmux uses smart case: lowercase searches include all case variants.
+        return native_ignore_case_pattern(pattern)
+    # tmux has no case-sensitive switch. An impossible uppercase branch
+    # disables smart case without adding any possible search matches.
+    return f"({pattern})|{IMPOSSIBLE_SEARCH}"
+
+
 def show_match(
     pane: str,
     query: str,
@@ -1005,14 +1075,7 @@ def show_match(
         if selection_start and selection_end is not None
         else native_highlight_pattern(query, match, text=text)
     )
-    _, flags = query_options(query)
-    if flags & re.IGNORECASE:
-        # tmux uses smart case: lowercase searches include all case variants.
-        search_pattern = native_ignore_case_pattern(search_pattern)
-    else:
-        # tmux has no case-sensitive switch. An impossible uppercase branch
-        # disables smart case without adding any possible search matches.
-        search_pattern = f"({search_pattern})|{IMPOSSIBLE_SEARCH}"
+    search_pattern = native_case_pattern(query, search_pattern)
     command = [
         "send-keys",
         "-X",
@@ -1061,7 +1124,12 @@ def show_match(
                     fragment.lower(),
                 ]
             )
-        if mode_keys == "emacs":
+        if not fragment:
+            # One character. The vi selection holds the cursor cell already,
+            # while the Emacs one ends before the cursor.
+            if mode_keys == "emacs":
+                command.extend([";", "send-keys", "-X", "-t", pane, "cursor-right"])
+        elif mode_keys == "emacs":
             # Search moves the Emacs cursor past the word after updating the
             # selection. Refresh that endpoint with a round trip of one cell.
             for movement in ("cursor-left", "cursor-right"):
@@ -1080,18 +1148,36 @@ def show_match(
                 ]
             )
         command.extend([";", "send-keys", "-X", "-t", pane, "stop-selection"])
-        command.extend(
-            [
-                ";",
-                "send-keys",
-                "-X",
-                "-t",
-                pane,
-                "search-forward-text",
-                "--",
-                f"pane-regex-clear-{time.monotonic_ns()}",
-            ]
-        )
+        # The searches above left their own hits painted. A stopped selection
+        # survives one more search, so this one paints every match instead. It
+        # runs backward from the selection end and lands on the selected match.
+        hints = hint_search_pattern(text, query, match)
+        if hints is None:
+            command.extend(
+                [
+                    ";",
+                    "send-keys",
+                    "-X",
+                    "-t",
+                    pane,
+                    "search-forward-text",
+                    "--",
+                    f"pane-regex-clear-{time.monotonic_ns()}",
+                ]
+            )
+        else:
+            command.extend(
+                [
+                    ";",
+                    "send-keys",
+                    "-X",
+                    "-t",
+                    pane,
+                    "search-backward",
+                    "--",
+                    native_case_pattern(query, hints),
+                ]
+            )
     tmux(*command, check=False)
 
 

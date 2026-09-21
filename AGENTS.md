@@ -36,11 +36,20 @@ it. Keep the interaction fast, local, and safe for shells and agent prompts.
   `run-shell` so multiline text cannot execute while the popup closes.
 - Python chooses the exact source range. Native tmux search and copy-mode
   selection must show that same range. Never add a second synthetic highlighter.
-- The native tmux search follows the selection start, so a `\zs` query highlights
-  the selected text and not its context.
+- The native tmux search follows the selection start, so the selection of a
+  `\zs` query covers the selected text and not its context.
 - The committed `^word$` line form draws a whole-line copy selection, while an
-  unfinished `^word` keeps the search highlight so typing does not flash a line. Every form that
-  selects gives up tmux's search state, so no form shows the other matches.
+  unfinished `^word` keeps the search highlight so typing does not flash a line.
+- Every form shows where Up and Down will land. A form that selects runs one
+  more search after the selection stops, naming the first line of every match
+  as a literal, since tmux cannot run the query and never matches across a
+  line. `\zs` and `\ze` context stays in those literals, or a short match would
+  paint every copy of itself, so context shows in the match colour around the
+  selection. The search names the matches nearest the current one, since a tmux
+  command holds about 16 KB.
+- A match of any length gets a selection: one word, one character, or a
+  selection that opens on a regex operator, which anchors on the first word
+  of the text Python chose.
 - Up selects an older occurrence. Down selects a newer one. Query refinement
   keeps the selected source position instead of resetting to the newest match.
 - Soft-wrapped text stays logical text. Multiline ranges start at the newest

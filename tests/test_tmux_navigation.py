@@ -62,6 +62,9 @@ class TmuxNavigationTests(unittest.TestCase):
             "print('')\n"
             "print('beta then beta again')\n"
             "print('')\n"
+            "print('call (one) and (two words) done')\n"
+            "print('say [first item] and [x] or [last]')\n"
+            "print('')\n"
             "print('docs at https://example.com/docs.')\n"
             "print('see (https://example.com/docs/a_(b)) now')\n"
             "print('long https://example.com/' + 'segment/' * 14 + 'end here')\n"
@@ -375,6 +378,55 @@ class TmuxNavigationTests(unittest.TestCase):
                         others.add(self.copy_mode_format("search_match"))
                     self.assertEqual(others, set(expected) - {text}, (mode, query))
                     self.mod.move_selection(self.pane, str(self.state), "older", query)
+
+    def test_ranges_select_what_python_chose_in_both_key_modes(self):
+        cases = {
+            # One-word matches sit beside longer ones.
+            r"^\(.*\)": [
+                "(b)",
+                "(https://example.com/docs/a_(b)",
+                "(two words)",
+                "(one)",
+            ],
+            # The selection opens on an operator, so no typed word anchors it.
+            r"^\[\zs.*\ze\]": ["last", "x", "first item"],
+        }
+        for mode in ("vi", "emacs"):
+            self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+            self.tmux("setw", "mode-keys", mode)
+            self.tmux("copy-mode", "-t", self.pane)
+            for query, expected in cases.items():
+                self.mod.write_match(self.state, query, None)
+                (self.state / "occurrence").write_text("0")
+                self.mod.update(self.pane, str(self.state), query)
+                for text in expected:
+                    match = self.mod.read_match(self.state, query)
+                    self.assertEqual(match.text, text, (mode, query))
+                    self.assertEqual(self.selected_text(), text, (mode, query))
+                    self.mod.move_selection(self.pane, str(self.state), "older", query)
+
+    def test_selection_keeps_every_other_match_painted(self):
+        query = r"^\[\zs.*\ze\]"
+        hints = ["[last]", "[x]", "[first item]"]
+        for mode in ("vi", "emacs"):
+            self.tmux("send-keys", "-X", "-t", self.pane, "cancel")
+            self.tmux("setw", "mode-keys", mode)
+            self.tmux("copy-mode", "-t", self.pane)
+            self.mod.write_match(self.state, query, None)
+            (self.state / "occurrence").write_text("0")
+            self.mod.update(self.pane, str(self.state), query)
+            for hint in hints:
+                # The selected match is the current hit, brackets and all, and
+                # the others are hits of the same search, which paints them.
+                self.assertEqual(self.copy_mode_format("search_match"), hint, mode)
+                others = set()
+                for _ in hints[1:]:
+                    self.tmux("send-keys", "-X", "-t", self.pane, "search-again")
+                    others.add(self.copy_mode_format("search_match"))
+                self.assertEqual(others, set(hints) - {hint}, mode)
+                # Walking the hits leaves the stopped selection alone.
+                self.assertEqual(self.selected_text(), hint[1:-1], mode)
+                self.mod.move_selection(self.pane, str(self.state), "older", query)
 
     def test_case_folding_keeps_negated_regex_escapes(self):
         match = self.mod.update(self.pane, str(self.state), r"^TOKEN\S+$$")
