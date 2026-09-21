@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 import tempfile
 import unittest
@@ -632,14 +633,48 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIsNone(self.mod.url_suffix_locator(r"^path\\u"))
         self.assertEqual(self.mod.url_suffix_locator(r"^path\\\u"), r"path\\")
 
-    def test_url_search_is_the_url_python_chose(self):
-        match = self.mod.Match("https://example.com/a?b=(1)", 0, 0)
+    def test_url_search_names_every_visited_url_longest_first(self):
+        text = "a https://example.com/docs. b (https://example.com/docs/a_(b)) c\n"
+        match = self.mod.find_latest_match(text, r"^example\u")
 
         self.assertEqual(
-            self.mod.native_highlight_pattern(r"^example\u", match),
-            r"https://example\.com/a\?b=\(1\)",
+            self.mod.native_highlight_pattern(r"^example\u", match, text=text),
+            r"(https://example\.com/docs/a_\(b\)|https://example\.com/docs)",
         )
         self.assertIsNone(self.mod.native_selection_start_pattern(r"^example\u", match))
+
+    def test_url_search_leaves_out_urls_the_locator_rejects(self):
+        text = "https://github.com/a and https://example.com/b\n"
+        match = self.mod.find_latest_match(text, r"^github\u")
+
+        self.assertEqual(
+            self.mod.native_highlight_pattern(r"^github\u", match, text=text),
+            r"https://github\.com/a",
+        )
+
+    def test_url_search_keeps_the_nearest_urls_within_the_tmux_budget(self):
+        urls = [f"https://example.com/{index:04}/" + "x" * 90 for index in range(200)]
+        text = "\n".join(urls) + "\n"
+        match = self.mod.find_latest_match(text, r"^\u", occurrence=100)
+
+        pattern = self.mod.native_highlight_pattern(r"^\u", match, text=text)
+
+        self.assertLessEqual(len(pattern), self.mod.URL_SEARCH_BUDGET + 2)
+        named = sorted(int(index) for index in re.findall(r"/(\d{4})/", pattern))
+        # Occurrence 100 is the URL numbered 99, and its neighbours fill the
+        # budget evenly on both sides.
+        self.assertEqual(named, list(range(named[0], named[-1] + 1)))
+        self.assertGreater(len(named), 20)
+        self.assertLessEqual(abs((99 - named[0]) - (named[-1] - 99)), 1)
+
+    def test_url_occurrence_counts_every_highlighted_url(self):
+        text = "https://example.com/docs.\n(https://example.com/docs/a_(b))\nhttps://new.example\n"
+        for occurrence in range(3):
+            match = self.mod.find_latest_match(text, r"^\u", occurrence=occurrence)
+
+            self.assertEqual(
+                self.mod.native_search_occurrence(text, r"^\u", match), occurrence
+            )
 
     def test_search_occurrence_anchors_on_the_earliest_hit_in_range(self):
         text = "beta one\nbeta two\n"
@@ -798,7 +833,7 @@ class PaneRegexMatchTests(unittest.TestCase):
         # The line form now counts its own native hits instead of reusing the
         # occurrence index. Both are 1 here, one locator hit per line.
         show_match.assert_called_once_with(
-            "%1", query, match, occurrence=1, search_occurrence=1
+            "%1", query, match, occurrence=1, search_occurrence=1, text=captured
         )
 
     def test_query_refinement_keeps_the_arrow_selected_occurrence(self):
@@ -822,7 +857,7 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertEqual(match.text, "screenshot line")
         self.assertEqual(occurrence, 1)
         show_match.assert_called_once_with(
-            "%1", new_query, match, occurrence=1, search_occurrence=1
+            "%1", new_query, match, occurrence=1, search_occurrence=1, text=captured
         )
 
     def test_query_refinement_tracks_source_when_match_order_changes(self):
@@ -848,7 +883,7 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertEqual(match.text, "this point is selected")
         self.assertEqual(occurrence, 0)
         show_match.assert_called_once_with(
-            "%1", new_query, match, occurrence=0, search_occurrence=None
+            "%1", new_query, match, occurrence=0, search_occurrence=None, text=captured
         )
 
     def test_trailing_anchor_space_accepts_only_a_current_match(self):

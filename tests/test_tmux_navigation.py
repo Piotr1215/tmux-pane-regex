@@ -154,6 +154,11 @@ class TmuxNavigationTests(unittest.TestCase):
         self.tmux("send-keys", "-X", "-t", self.pane, "copy-selection")
         return self.tmux("show-buffer").stdout
 
+    def copy_mode_format(self, name):
+        return self.tmux(
+            "display-message", "-p", "-t", self.pane, f"#{{{name}}}"
+        ).stdout.rstrip("\n")
+
     def test_arrows_visit_every_match_in_both_directions_including_old_history(self):
         query = "^needle$$"
         self.mod.update(self.pane, str(self.state), query)
@@ -334,7 +339,7 @@ class TmuxNavigationTests(unittest.TestCase):
             self.assertEqual(match.text, expected, query)
             self.assertEqual(self.selected_text(), match.text, query)
 
-    def test_url_suffix_selects_exactly_what_python_chose(self):
+    def test_url_suffix_highlights_every_url_and_lands_on_the_chosen_one(self):
         wrapped = "https://example.com/" + "segment/" * 14 + "end"
         cases = {
             r"^\u": [
@@ -355,7 +360,20 @@ class TmuxNavigationTests(unittest.TestCase):
                 for text in expected:
                     match = self.mod.read_match(self.state, query)
                     self.assertEqual(match.text, text, (mode, query))
-                    self.assertEqual(self.selected_text(), text, (mode, query))
+                    # The current hit is the yellow one.
+                    self.assertEqual(
+                        self.copy_mode_format("search_match"), text, (mode, query)
+                    )
+                    self.assertEqual(
+                        self.copy_mode_format("selection_present"), "0", (mode, query)
+                    )
+                    # The other URLs are hits of the same search, which is
+                    # what paints them, so tmux's own repeat walks them all.
+                    others = set()
+                    for _ in expected[1:]:
+                        self.tmux("send-keys", "-X", "-t", self.pane, "search-again")
+                        others.add(self.copy_mode_format("search_match"))
+                    self.assertEqual(others, set(expected) - {text}, (mode, query))
                     self.mod.move_selection(self.pane, str(self.state), "older", query)
 
     def test_case_folding_keeps_negated_regex_escapes(self):

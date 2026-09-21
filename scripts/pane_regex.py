@@ -33,6 +33,9 @@ URL_SUFFIX = re.compile(r"\^(.*?(?<!\\)(?:\\\\)*)\\[uU]", re.DOTALL)
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"'`<>]+", re.IGNORECASE)
 URL_TRAILING = ".,:;!?"
 URL_CLOSERS = {")": "(", "]": "[", "}": "{"}
+# tmux refuses a command near 16 KB, and the repeated search-again steps share
+# that room, so the URL search names only the URLs nearest the chosen one.
+URL_SEARCH_BUDGET = 4096
 # Two line-anchored groups in a row can never match, whatever the case folding.
 IMPOSSIBLE_SEARCH = "(^A$)(^B$)"
 # Every shortcut, so the picker shows what it can do. Three lines fill the
@@ -345,6 +348,32 @@ def url_matches(clean: str, locator: str, flags: re.RegexFlag) -> list[Match]:
             continue
         matches.append(offsets_result(clean, found.start(), found.start() + len(text)))
     return matches
+
+
+def url_search_pattern(
+    clean: str, locator: str, flags: re.RegexFlag, match: Match
+) -> str:
+    """Name every visited URL so tmux highlights them all, as a plain search does.
+
+    tmux knows no URL shape, so it searches for the URLs Python chose, each a
+    literal. The longest comes first, which makes Python's first alternative
+    the hit tmux's longest match lands on, so both count the same occurrences.
+    """
+    nearest = sorted(
+        url_matches(clean, locator, flags),
+        key=lambda url: abs(url.start_offset - match.start_offset),
+    )
+    literals: list[str] = []
+    used = 0
+    for text in dict.fromkeys([match.text, *(url.text for url in nearest)]):
+        literal = prose_friendly_pattern(ere_literal(text))
+        used += len(literal.encode()) + 1
+        if literals and used > URL_SEARCH_BUDGET:
+            break
+        literals.append(literal)
+    if len(literals) == 1:
+        return literals[0]
+    return "(" + "|".join(sorted(literals, key=len, reverse=True)) + ")"
 
 
 def paragraph_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
@@ -806,14 +835,16 @@ def marker_highlight_pattern(query: str, match: Match | None) -> str:
     return prose_friendly_pattern(body)
 
 
-def native_highlight_pattern(query: str, match: Match | None = None) -> str:
+def native_highlight_pattern(
+    query: str, match: Match | None = None, *, text: str = ""
+) -> str:
     """Choose the stable single-line locator for tmux's native highlighter."""
-    query, _ = query_options(query)
-    if url_suffix_locator(query) is not None:
-        # tmux knows no URL shape, so it searches for the one Python chose.
+    query, flags = query_options(query)
+    locator = url_suffix_locator(query)
+    if locator is not None:
         if match is None:
             return IMPOSSIBLE_SEARCH
-        return prose_friendly_pattern(ere_literal(match.text))
+        return url_search_pattern(clean_scrollback(text), locator, flags, match)
     query = block_highlight_query(query) or query
     if has_selection_markers(query):
         return marker_highlight_pattern(query, match)
@@ -906,9 +937,9 @@ def native_search_occurrence(text: str, query: str, match: Match) -> int | None:
     pattern = native_selection_start_pattern(query, match)
     if pattern is None and (selects_whole_line(query) or selects_url(query)):
         # A block form reports one entry per line, while tmux walks every hit
-        # on it. A URL search also hits the longer URLs it is a prefix of.
-        # Counting the hits keeps the two in step.
-        pattern = native_highlight_pattern(query, match)
+        # on it. A URL search hits every URL it names. Counting the hits keeps
+        # the two in step.
+        pattern = native_highlight_pattern(query, match, text=text)
     if pattern is None:
         return None
     clean = clean_scrollback(text)
@@ -962,20 +993,17 @@ def show_match(
     occurrence: int = 0,
     *,
     search_occurrence: int | None = None,
+    text: str = "",
 ) -> None:
     selection_start = (
         native_selection_start_pattern(query, match) if match is not None else None
     )
     whole_line = match is not None and selects_whole_line(query)
     selection_end = selection_end_fragment(match) if selection_start and match else None
-    if match is not None and selects_url(query):
-        # A URL is one unbroken token, so everything after its first character
-        # is an ending fragment exactly one search away, soft wraps included.
-        selection_end = (match.text[1:], 1)
     search_pattern = (
         selection_start
         if selection_start and selection_end is not None
-        else native_highlight_pattern(query, match)
+        else native_highlight_pattern(query, match, text=text)
     )
     _, flags = query_options(query)
     if flags & re.IGNORECASE:
@@ -1120,6 +1148,7 @@ def update(pane: str, state_name: str, query: str) -> Match | None:
             match,
             occurrence=occurrence,
             search_occurrence=search_occurrence,
+            text=captured,
         )
         return match
 
@@ -1161,6 +1190,7 @@ def move_selection(pane: str, state_name: str, direction: str, query: str) -> No
             match,
             occurrence=candidate,
             search_occurrence=search_occurrence,
+            text=captured,
         )
 
 

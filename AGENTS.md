@@ -78,8 +78,11 @@ The documented selector forms are public behavior:
   The form expands to the marker form and shares its highlight and navigation.
 - `^\u` visits every URL newest first and `^word\u` only the URLs containing
   `word`. Trailing sentence punctuation and unbalanced closers stay out. tmux
-  searches for the exact URL Python chose, then selects the rest of it with one
-  forward text search, so soft wraps hold in both key modes. Either case works.
+  searches for the exact URLs Python chose, so it highlights every one and
+  marks the current one, as a plain search does. The form draws no selection,
+  and a URL is one search hit, so soft wraps hold in both key modes. The search
+  names the URLs nearest the current one, since a tmux command holds about
+  16 KB. Either case works.
 - `\zs` and `\ze` mark where the selection starts and ends. Text outside them
   must match and stays out of the selection. They translate to one named group,
   never to a lookaround, so the context carries no fixed-width limit.

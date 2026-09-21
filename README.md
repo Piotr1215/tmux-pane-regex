@@ -102,7 +102,9 @@ groups, `\2` still refers to the second one.
 run up to whitespace, a quote, a backtick, or an angle bracket. Sentence
 punctuation after it and a closing bracket it never opened are left out, so
 `(see https://example.com/a_(b)).` selects `https://example.com/a_(b)`.
-Press Ctrl+Y to copy it or Enter to paste it. `\U` reads the same.
+Every URL the query visits is highlighted, with the current one marked, so you
+see where Up and Down will land. Press Ctrl+Y to copy it or Enter to paste it.
+`\U` reads the same.
 
 Add `\C` before the locator to make a query case-sensitive: `^\Cpython$$`
 selects from lowercase `python` through its line end, while `\Cpython`
