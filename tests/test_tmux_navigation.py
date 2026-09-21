@@ -256,6 +256,10 @@ class TmuxNavigationTests(unittest.TestCase):
                     r"^Two.*the\2t",
                     "Two different things with the same name, and only one of",
                 ),
+                (
+                    r"^Two.+the\2",
+                    "Two different things with the same name, and only one of the",
+                ),
             ):
                 match = self.mod.update(self.pane, str(self.state), query)
                 self.assertEqual(match.text, expected, (mode, query))

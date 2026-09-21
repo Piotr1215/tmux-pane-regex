@@ -19,6 +19,11 @@ it. Keep the interaction fast, local, and safe for shells and agent prompts.
 
 ## Stable contracts
 
+- Extend Python regex, never change it. The picker exists to harpoon one string
+  out of scrollback, so shortcuts are new atoms for that job. A new shortcut
+  claims only syntax Python rejects, and a valid regex keeps the meaning Python
+  gives it. `\ss`, `$$`, `\f`, `\t` and the lazy first `.*` predate this rule.
+- Every shortcut appears in the picker legend.
 - `prefix + R` is the default launcher. `@pane-regex-key` changes it.
 - `@pane-regex-script` exposes the executable to external text expanders.
 - Direct tmux launches pass `--pane '#{pane_id}'` and start with a fresh `^`.
@@ -65,10 +70,11 @@ The documented selector forms are public behavior:
   vim `v3f,` and `v3t,`. The count defaults to one. The target is the literal
   rest of the query, one character or a word, so `^start\2fout` reaches the
   second `out`. `\t` also stops before the whitespace ahead of its target.
-- `^start.*stop\2` repeats the hop after the last `.*` twice, and `\2t` stops
+- `^start.*stop\2` repeats the hop after the last `.*` or `.+` twice, and `\2t` stops
   before the second `stop`. The bare range is the implicit `\1`. The landmark
-  stays a regex, wrapped in a group. Without a `.*` before it, a trailing `\2`
-  stays a regex backreference.
+  stays a regex, wrapped in a group. A count needs a digit and applies only
+  where Python would reject it as a group reference, so a query with two
+  groups keeps its `\2` backreference.
   The form expands to the marker form and shares its highlight and navigation.
 - `^\u` visits every URL newest first and `^word\u` only the URLs containing
   `word`. Trailing sentence punctuation and unbalanced closers stay out. tmux

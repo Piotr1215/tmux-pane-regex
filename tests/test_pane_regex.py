@@ -114,6 +114,20 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.text, "with first match")
 
+    def test_bare_dot_plus_keeps_its_greedy_regex_meaning(self):
+        text = "with first match and later match\nafter match\n"
+
+        match = self.mod.find_latest_match(text, r"^with.+match")
+
+        self.assertEqual(match.text, text.rstrip("\n"))
+
+    def test_trailing_count_makes_a_dot_plus_hop_lazy(self):
+        text = "with first match and later match\nafter match\n"
+
+        match = self.mod.find_latest_match(text, r"^with.+match\1")
+
+        self.assertEqual(match.text, "with first match")
+
     def test_escaped_final_dollar_is_a_literal_ending_locator(self):
         text = "before\nsession output $ and more\nafter\n"
 
@@ -301,7 +315,7 @@ class PaneRegexMatchTests(unittest.TestCase):
         expected = (
             "change, so it works without reloading\nand stays uncommitted without"
         )
-        for query in (r"^change.*out\2", r"^change.*out\2f"):
+        for query in (r"^change.*out\2", r"^change.*out\2f", r"^change.+out\2"):
             with self.subTest(query=query):
                 self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
 
@@ -322,11 +336,31 @@ class PaneRegexMatchTests(unittest.TestCase):
             self.mod.motion_suffix_pattern(r"^a.*b.*?c\2t"),
             r"^a.*b(.*?(c)){1}.*?\ze\s*(c)",
         )
+        self.assertEqual(
+            self.mod.motion_suffix_pattern(r"^a.+b\2t"), r"^a(.+?(b)){1}.+?\ze\s*(b)"
+        )
 
     def test_trailing_count_needs_a_landmark_before_it(self):
         for query in (r"^start\2", r"^(a).*\1", r"^start.*stop\\2", r"^start.*stop"):
             with self.subTest(query=query):
                 self.assertIsNone(self.mod.motion_suffix_pattern(query))
+
+    def test_counts_never_change_what_python_already_accepts(self):
+        # A backreference to an existing group, a tab, and an octal escape are
+        # all valid regex, so each keeps the meaning Python gives it.
+        for query in (
+            r"^(a)(b).*c\2",
+            r"^(a)(b)\2fx",
+            r"^key.*value\t",
+            r"^start.*stop\0",
+        ):
+            with self.subTest(query=query):
+                self.assertIsNone(self.mod.motion_suffix_pattern(query))
+
+    def test_count_past_the_last_group_is_still_a_count(self):
+        self.assertEqual(
+            self.mod.motion_suffix_pattern(r"^(a).*b\2"), r"^(a)(.*?(b)){2}"
+        )
 
     def test_motion_escapes_a_regex_special_character(self):
         text = "one. two. three. four.\n"
@@ -565,6 +599,29 @@ class PaneRegexMatchTests(unittest.TestCase):
                 match = self.mod.find_latest_match(text, r"^\u")
 
                 self.assertEqual(match.text, expected)
+
+    def test_legend_names_every_shortcut_and_fits_the_popup(self):
+        lines = self.mod.LEGEND.split("\n")
+
+        for shortcut in (
+            r".*word\2",
+            r"\2t",
+            r"\3f,",
+            r"\zs",
+            r"\ze",
+            "$$",
+            r"\l",
+            r"\p",
+            r"\ss",
+            r"\u",
+            r"\C",
+            "Ctrl-Y",
+        ):
+            with self.subTest(shortcut=shortcut):
+                self.assertIn(shortcut, self.mod.LEGEND)
+        self.assertLessEqual(len(lines), 3)
+        self.assertLessEqual(max(map(len, lines)), 72)
+        self.assertNotRegex(self.mod.LEGEND, r"[()]")
 
     def test_bare_scheme_is_not_a_url(self):
         self.assertIsNone(self.mod.find_latest_match("scheme https://.", r"^\u"))

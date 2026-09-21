@@ -26,15 +26,25 @@ SELECTION_END = r"\ze"
 SELECTION_GROUP = "sel"
 LINE_SUFFIX = r"\L"
 PARAGRAPH_SUFFIX = r"\P"
-MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft])(.+)$", re.DOTALL)
-COUNT_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\(\d*)([ft]?)$")
-LANDMARK_HOP = re.compile(r"(?<!\\)\.\*\??")
+MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\([1-9]\d*)?([ft])(.+)$", re.DOTALL)
+COUNT_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\([1-9]\d*)([ft]?)$")
+LANDMARK_HOP = re.compile(r"(?<!\\)\.[*+]\??")
 URL_SUFFIX = re.compile(r"\^(.*?(?<!\\)(?:\\\\)*)\\[uU]", re.DOTALL)
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"'`<>]+", re.IGNORECASE)
 URL_TRAILING = ".,:;!?"
 URL_CLOSERS = {")": "(", "]": "[", "}": "{"}
 # Two line-anchored groups in a row can never match, whatever the case folding.
 IMPOSSIBLE_SEARCH = "(^A$)(^B$)"
+# Every shortcut, so the picker shows what it can do. Three lines fill the
+# popup exactly, and no line may hold a parenthesis, which would end the fzf
+# action that restores the legend after a no-match message.
+LEGEND = "\n".join(
+    (
+        "Up/Down older/newer  Enter/Tab paste  Ctrl-Y copy  Esc cancel",
+        r".*word\2 2nd word  \2t stop before  \3f, 3rd comma  \zs \ze trim",
+        r"$$ line end  \l line  \p paragraph  \ss sentence  \u url  \C case",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,8 @@ def motion_suffix_pattern(pattern: str) -> str | None:
     if found is None:
         return trailing_count_pattern(pattern)
     start = pattern[: found.start()] + found.group(1)
+    if shadows_group_reference(start, found.group(2)):
+        return None
     return motion_pattern(
         start, found.group(2), found.group(3), re.escape(found.group(4))
     )
@@ -79,14 +91,16 @@ def trailing_count_pattern(pattern: str) -> str | None:
     r"""Expand ``^start.*stop\2`` into a range through the second ``stop``.
 
     The bare range already ends at the first ``stop``, so a count typed last
-    only repeats the final lazy hop and fixing it is one backspace. ``\2t``
-    stops before it. The landmark stays a regex, grouped so an alternation
-    cannot escape the hop.
+    only repeats the final lazy hop, ``.*`` or ``.+`` as typed, and fixing it
+    is one backspace. ``\2t`` stops before it. The landmark stays a regex,
+    grouped so an alternation cannot escape the hop.
     """
     found = COUNT_SUFFIX.search(pattern)
-    if found is None or not (found.group(2) or found.group(3)):
+    if found is None:
         return None
     body = pattern[: found.start()] + found.group(1)
+    if shadows_group_reference(body, found.group(2)):
+        return None
     hops = list(LANDMARK_HOP.finditer(body))
     if not hops or hops[-1].end() == len(body):
         return None
@@ -96,20 +110,41 @@ def trailing_count_pattern(pattern: str) -> str | None:
         found.group(2),
         found.group(3),
         f"({body[last.end() :]})",
+        hop=last.group(0)[:2] + "?",
     )
 
 
-def motion_pattern(start: str, count: str, kind: str, target: str) -> str | None:
+def shadows_group_reference(before: str, count: str | None) -> bool:
+    r"""Report a count Python already reads as a backreference.
+
+    ``\2`` is a count only where Python rejects it for naming a group the
+    query does not have, so a shortcut never changes what a valid regex means.
+    """
+    if not count:
+        return False
+    marker = 1 if before.startswith("^") else 0
+    if before[marker : marker + 2] == r"\C":
+        before = before[:marker] + before[marker + 2 :]
+    try:
+        groups = re.compile(strip_selection_markers(before)).groups
+    except re.error:
+        return False
+    return int(count) <= groups
+
+
+def motion_pattern(
+    start: str, count: str | None, kind: str, target: str, *, hop: str = ".*?"
+) -> str | None:
     """Build the lazy hops for an ``f`` or ``t`` motion towards a target."""
     if len(start) < 2:
         return None
     count = max(int(count or 1), 1)
     if kind != "t":
-        return f"{start}(.*?{target}){{{count}}}"
-    context = f"(.*?{target}){{{count - 1}}}" if count > 1 else ""
+        return f"{start}({hop}{target}){{{count}}}"
+    context = f"({hop}{target}){{{count - 1}}}" if count > 1 else ""
     # The native selection ends on the last visible character, so the space
     # before the target stays out of the paste too.
-    return rf"{start}{context}.*?{SELECTION_END}\s*{target}"
+    return rf"{start}{context}{hop}{SELECTION_END}\s*{target}"
 
 
 def has_selection_markers(pattern: str) -> bool:
@@ -1223,12 +1258,11 @@ def fzf_command(pane: str, state: Path, initial_query: str) -> list[str]:
         "--pointer=",
         "--marker=",
         "--prompt=regex> ",
-        r"--header=Up older. Down newer. Enter/Tab paste. Ctrl-Y copy. "
-        r".*word\2 2nd word. \u url.",
+        f"--header={LEGEND}",
         f"--query={initial_query}",
         "--print-query",
         "--bind",
-        f"start,change:execute-silent({record_query})",
+        f"start,change:execute-silent({record_query})+change-header({LEGEND})",
         "--bind",
         f"tab,enter:transform({accept_command})",
         "--bind",

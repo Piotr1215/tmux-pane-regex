@@ -43,10 +43,10 @@ output:
 
 | Query | Selection |
 | --- | --- |
-| `^start\3f,` | Through the third `,`, vim `v3f,` |
-| `^start\3t,` | Up to the third `,`, vim `v3t,` |
-| `^start\2fout` | Through the second `out` |
-| `^start.*stop\2` | Through the second `stop`, `\2t` up to it |
+| `^start\3f,` | Through the third `,`, vim `v3f,`. The target is literal text |
+| `^start\3t,` | Up to the third `,`, vim `v3t,`. The target is literal text |
+| `^start\2fout` | Through the second `out`. The target is literal text |
+| `^start.*stop\2` | Through the second `stop`, `\2t` up to it. `stop` is regex, so write `\.` for a period |
 | `^word$` | Latest logical line containing `word` |
 | `^start.*end` | From `start` downward through the first `end` |
 | `^start$$` | From `start` through that logical line's last visible character |
@@ -92,7 +92,10 @@ before its target, so the selection ends on a visible character.
 A count can also come last. `^start.*stop` already ends at the first `stop`, so
 `^start.*stop\2` ends at the second and `^start.*stop\2t` just before it.
 Changing the count is one backspace. The count repeats only the hop after the
-last `.*`, and that landmark stays a regex, so `^start.*(stop|end)\3` works.
+last `.*` or `.+`, and that landmark stays a regex, so `^start.*(stop|end)\3`
+works. A bare `.+` keeps its greedy regex meaning; `^start.+stop\1` is the
+lazy form. A count never replaces a real backreference: in a query with two
+groups, `\2` still refers to the second one.
 
 `\u` selects a URL. `^\u` visits every URL in scrollback, newest first, and
 `^github\u` keeps only the ones containing `github`. A URL is any `scheme://`
@@ -104,6 +107,9 @@ Press Ctrl+Y to copy it or Enter to paste it. `\U` reads the same.
 Add `\C` before the locator to make a query case-sensitive: `^\Cpython$$`
 selects from lowercase `python` through its line end, while `\Cpython`
 selects just the word. Uppercase letters alone do not change the default.
+
+The picker header lists every shortcut, so the table above is always one
+keypress away.
 
 - Up selects an older occurrence.
 - Down selects a newer occurrence.
