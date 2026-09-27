@@ -121,8 +121,9 @@ line.
 - Down selects a newer occurrence.
 - Enter or Tab pastes the current selection.
 - Ctrl+Y copies the current selection to the clipboard and closes the picker
-  without inserting it. It also removes the inline `;;^` trigger and recovered
-  query text. With no match, the picker stays open.
+  without inserting it. The selection also lands in a new tmux paste buffer, so
+  `prefix + ]` pastes it later. It also removes the inline `;;^` trigger and
+  recovered query text. With no match, the picker stays open.
 - Space accepts when the query ends in an unescaped `$`.
 - Esc closes the picker without pasting and removes the inline `;;^` trigger,
   including any query text typed into the source prompt before the popup opened.
@@ -133,6 +134,8 @@ The tmux `history-limit` setting still controls how much scrollback exists.
 Pasted text uses tmux bracketed paste. It never submits a command or message.
 Clipboard copying uses tmux's native clipboard escape sequence (OSC 52), so the
 attached terminal must allow clipboard writes. No clipboard helper is required.
+Terminals that ignore OSC 52, such as GNOME Terminal and other VTE terminals,
+still get the copy through `prefix + ]`.
 
 ## Configure
 
@@ -159,8 +162,9 @@ The script captures all retained history from the target pane and joins tmux sof
 wraps. Python regex matching chooses the exact source range. The visible
 feedback is then rendered in the source pane with tmux's native search and
 copy-mode selection primitives. Accepting writes the match to a named tmux
-buffer and defers a bracketed paste until the popup has closed. Ctrl+Y sends the
-same text to the attached client's clipboard and removes the temporary buffer.
+buffer and defers a bracketed paste until the popup has closed. Ctrl+Y loads the
+same text into a new automatic tmux buffer and sends it to the attached client's
+clipboard.
 
 ## Test
 

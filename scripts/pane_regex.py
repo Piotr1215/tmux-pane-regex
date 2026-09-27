@@ -1328,10 +1328,9 @@ def accept(pane: str, state: Path, query: str, *, clipboard: bool = False) -> No
         client = tmux(
             "display-message", "-p", "-t", pane, "#{client_name}", capture_output=True
         ).stdout.strip()
-        try:
-            tmux("load-buffer", "-w", "-t", client, "-b", state.name, str(match_file))
-        finally:
-            tmux("delete-buffer", "-b", state.name, check=False)
+        # An automatic buffer, not a named one, so prefix + ] still pastes the
+        # match on terminals that ignore OSC 52, such as the VTE family.
+        tmux("load-buffer", "-w", "-t", client, str(match_file))
     else:
         run(["bash", str(DELIVER), "--file", pane, str(match_file)])
 

@@ -872,6 +872,31 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertEqual(action, "accept")
         update.assert_not_called()
 
+    def test_copy_keeps_the_match_in_an_automatic_tmux_buffer(self):
+        query = r"^screen$$"
+        with tempfile.TemporaryDirectory(prefix="pane-regex-expand-test-") as name:
+            state = Path(name)
+            self.mod.write_match(state, query, self.mod.Match("older screen", 2, 2))
+
+            with (
+                mock.patch.object(self.mod, "tmux") as tmux,
+                mock.patch.object(self.mod, "run") as run,
+            ):
+                tmux.return_value.stdout = "/dev/pts/3\n"
+                self.mod.accept("%1", state, query, clipboard=True)
+
+            copied = (state / "match.txt").read_text()
+
+        commands = [call.args for call in tmux.call_args_list]
+        # No -b: a named buffer is not automatic, so prefix + ] would skip it.
+        self.assertIn(
+            ("load-buffer", "-w", "-t", "/dev/pts/3", str(state / "match.txt")),
+            commands,
+        )
+        self.assertNotIn("delete-buffer", [command[0] for command in commands])
+        self.assertEqual(copied, "older screen")
+        run.assert_not_called()
+
     def test_watcher_refresh_keeps_the_arrow_selected_occurrence(self):
         query = r"^screen$"
         captured = "older screenshot line\nnewer screenshot line\n"
