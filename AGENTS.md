@@ -32,6 +32,8 @@ it. Keep the interaction fast, local, and safe for shells and agent prompts.
 - Ctrl+Y copies the same match to the attached client's clipboard and closes the
   picker without inserting text. It removes the inline trigger like paste does.
   With no match, the picker stays open.
+- Ctrl+Y leaves the match in a new automatic tmux buffer, never a named one, so
+  `prefix + ]` pastes it on terminals that ignore OSC 52.
 - Pane delivery uses a named tmux buffer, bracketed paste, and a deferred
   `run-shell` so multiline text cannot execute while the popup closes.
 - Python chooses the exact source range. Native tmux search and copy-mode

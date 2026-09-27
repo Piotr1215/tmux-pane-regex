@@ -498,6 +498,28 @@ class TmuxNavigationTests(unittest.TestCase):
             time.sleep(0.02)
         self.fail("Ctrl+Y did not report the missing match")
 
+    @unittest.skipUnless(shutil.which("fzf"), "fzf is required")
+    def test_ctrl_y_leaves_the_match_for_prefix_bracket(self):
+        # VTE terminals ignore OSC 52, so the tmux buffer is the only copy
+        # that survives there. prefix + ] pastes the newest automatic buffer.
+        self.open_copy_popup()
+        os.write(self.master, b"python$$")
+        self.wait_for_match("PYTHON newest")
+        for name in self.tmux("list-buffers", "-F", "#{buffer_name}").stdout.split():
+            self.tmux("delete-buffer", "-b", name)
+
+        os.write(self.master, b"\x19")
+
+        self.wait_for_clipboard("PYTHON newest")
+        self.tmux("paste-buffer", "-t", self.pane)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            captured = self.tmux("capture-pane", "-p", "-t", self.pane).stdout
+            if "DEST> keep thisPYTHON newest" in captured:
+                return
+            time.sleep(0.02)
+        self.fail("prefix + ] did not paste the copied match")
+
     def open_copy_popup(self, inline_query=""):
         # Selection probes must not copy themselves. load-buffer -w still
         # explicitly sends the clipboard when set-clipboard is off.
