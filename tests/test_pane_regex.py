@@ -617,6 +617,8 @@ class PaneRegexMatchTests(unittest.TestCase):
             r"\u",
             r"\C",
             "Ctrl-Y",
+            "C-p",
+            "C-n",
         ):
             with self.subTest(shortcut=shortcut):
                 self.assertIn(shortcut, self.mod.LEGEND)
@@ -850,12 +852,12 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertIn("desired", rendered)
         self.assertNotIn("--update", rendered)
 
-    def test_fzf_arrows_move_between_native_tmux_highlights(self):
+    def test_fzf_navigation_keys_move_between_native_tmux_highlights(self):
         command = self.mod.fzf_command("%1", Path("/tmp/pane-regex-expand-test"), "^")
         rendered = " ".join(command)
 
-        self.assertIn("up:execute-silent", rendered)
-        self.assertIn("down:execute-silent", rendered)
+        self.assertIn("up,ctrl-p:execute-silent", rendered)
+        self.assertIn("down,ctrl-n:execute-silent", rendered)
         self.assertIn("--move %1 /tmp/pane-regex-expand-test older", rendered)
         self.assertIn("--move %1 /tmp/pane-regex-expand-test newer", rendered)
 

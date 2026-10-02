@@ -44,7 +44,7 @@ IMPOSSIBLE_SEARCH = "(^A$)(^B$)"
 # action that restores the legend after a no-match message.
 LEGEND = "\n".join(
     (
-        "Up/Down older/newer  Enter/Tab paste  Ctrl-Y copy  Esc cancel",
+        "Up/C-p older  Down/C-n newer  Enter/Tab paste  Ctrl-Y copy  Esc cancel",
         r".*word\2 2nd word  \2t stop before  \3f, 3rd comma  \zs \ze trim",
         r"$$ line end  \l line  \p paragraph  \ss sentence  \u url  \C case",
     )
@@ -1385,9 +1385,9 @@ def fzf_command(pane: str, state: Path, initial_query: str) -> list[str]:
         "--bind",
         f"space:transform({space_command})",
         "--bind",
-        f"up:execute-silent({older_command})",
+        f"up,ctrl-p:execute-silent({older_command})",
         "--bind",
-        f"down:execute-silent({newer_command})",
+        f"down,ctrl-n:execute-silent({newer_command})",
     ]
 
 

@@ -117,8 +117,8 @@ The current match is selected exactly, and every other match is highlighted, so
 you see where Up and Down will land. A match that spans lines shows its first
 line.
 
-- Up selects an older occurrence.
-- Down selects a newer occurrence.
+- Up or Ctrl+P selects an older occurrence.
+- Down or Ctrl+N selects a newer occurrence.
 - Enter or Tab pastes the current selection.
 - Ctrl+Y copies the current selection to the clipboard and closes the picker
   without inserting it. The selection also lands in a new tmux paste buffer, so
