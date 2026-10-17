@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from bisect import bisect_left
 from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -600,9 +601,16 @@ def latest_regex_match(text: str, pattern: str) -> re.Match[str] | None:
     return matches[0] if matches else None
 
 
+@lru_cache(maxsize=4)
+def newline_offsets(clean: str) -> list[int]:
+    """Index the line breaks once. Counting them per match is quadratic."""
+    return [found.start() for found in re.finditer("\n", clean)]
+
+
 def offsets_result(clean: str, start: int, end: int) -> Match:
-    start_line = clean.count("\n", 0, start)
-    end_line = clean.count("\n", 0, max(start, end - 1))
+    newlines = newline_offsets(clean)
+    start_line = bisect_left(newlines, start)
+    end_line = bisect_left(newlines, max(start, end - 1))
     return Match(
         clean[start:end],
         start_line,
