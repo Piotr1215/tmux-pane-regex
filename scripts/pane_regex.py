@@ -27,6 +27,18 @@ SELECTION_END = r"\ze"
 SELECTION_GROUP = "sel"
 LINE_SUFFIX = r"\L"
 PARAGRAPH_SUFFIX = r"\P"
+# vim's inner text objects. Python rejects ``\i``, so none shadows a regex.
+PARAGRAPH_OBJECT = r"\ip"
+SENTENCE_OBJECT = r"\is"
+WORD_OBJECT = r"\iw"
+BIG_WORD_OBJECT = r"\iW"
+WORD_CHAR = re.compile(r"\w")
+BIG_WORD_CHAR = re.compile(r"\S")
+# A sentence ends at a terminator and any closing quotes or brackets before
+# whitespace, so the dot in ``pane_regex.py`` ends nothing. A blank line ends
+# one too.
+SENTENCE_HEAD = re.compile(r"[.!?][\"')\]’”]*(?=\s)|\n\n")
+SENTENCE_TAIL = re.compile(r"[.!?][\"')\]’”]*(?=\s|\Z)|\n\n")
 MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\([1-9]\d*)?([ft])(.+)$", re.DOTALL)
 COUNT_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\([1-9]\d*)([ft]?)$")
 LANDMARK_HOP = re.compile(r"(?<!\\)\.[*+]\??")
@@ -44,9 +56,9 @@ IMPOSSIBLE_SEARCH = "(^A$)(^B$)"
 # action that restores the legend after a no-match message.
 LEGEND = "\n".join(
     (
-        "Up/Down older/newer  Enter/Tab paste  Ctrl-Y copy  Esc cancel",
-        r".*word\2 2nd word  \2t stop before  \3f, 3rd comma  \zs \ze trim",
-        r"$$ line end  \l line  \p paragraph  \ss sentence  \u url  \C case",
+        r"Up/Down older/newer  Enter/Tab paste  Ctrl-Y copy  Esc cancel  \C case",
+        r".*word\2 2nd word  \2t before  \3f, 3rd comma  \zs \ze trim  \u url",
+        r"$$ line end  \l line  \ip para  \is \ss sentence  \iw word  \iW WORD",
     )
 )
 
@@ -297,14 +309,11 @@ def line_tail_start_pattern(pattern: str) -> str | None:
     return line_tail_shorthand(pattern) or open_ended_line_pattern(pattern)
 
 
-def block_start_pattern(pattern: str, suffix: str) -> str | None:
-    """Return the locator in a ``^start\\l`` or ``^start\\p`` form.
-
-    Either case reads the same, so the shift key is optional.
-    """
+def block_start_pattern(pattern: str, *forms: str) -> str | None:
+    """Return the locator in a ``^start\\l`` or ``^start\\p`` form."""
     if not pattern.startswith("^"):
         return None
-    for form in (suffix.lower(), suffix.upper()):
+    for form in forms:
         if pattern.endswith(form):
             start = pattern[1 : -len(form)]
             return start or None
@@ -312,11 +321,23 @@ def block_start_pattern(pattern: str, suffix: str) -> str | None:
 
 
 def line_suffix_start(pattern: str) -> str | None:
-    return block_start_pattern(pattern, LINE_SUFFIX)
+    # Either case reads the same, so the shift key is optional.
+    return block_start_pattern(pattern, LINE_SUFFIX.lower(), LINE_SUFFIX)
 
 
 def paragraph_suffix_start(pattern: str) -> str | None:
-    return block_start_pattern(pattern, PARAGRAPH_SUFFIX)
+    return block_start_pattern(
+        pattern, PARAGRAPH_SUFFIX.lower(), PARAGRAPH_SUFFIX, PARAGRAPH_OBJECT
+    )
+
+
+def text_object_start(pattern: str):
+    """Return the locator and bounds of a ``^word\\iw``, ``\\iW`` or ``\\is`` form."""
+    for suffix, bounds in TEXT_OBJECTS.items():
+        start = block_start_pattern(pattern, suffix)
+        if start is not None:
+            return start, bounds
+    return None
 
 
 def url_suffix_locator(pattern: str) -> str | None:
@@ -423,6 +444,74 @@ def line_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
     top = clean.rfind("\n", 0, start) + 1
     tail = clean.find("\n", max(start, end - 1))
     return top, len(clean) if tail < 0 else tail
+
+
+def grow_bounds(
+    clean: str, start: int, end: int, char: re.Pattern[str]
+) -> tuple[int, int]:
+    """Grow an offset range while the characters on either side are ``char``."""
+    while start > 0 and char.match(clean, start - 1):
+        start -= 1
+    while end < len(clean) and char.match(clean, end):
+        end += 1
+    return start, end
+
+
+def word_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
+    """Grow an offset range to the vim word around it, letters, digits and ``_``."""
+    return grow_bounds(clean, start, end, WORD_CHAR)
+
+
+def big_word_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
+    """Grow an offset range to the vim WORD around it, all but whitespace."""
+    return grow_bounds(clean, start, end, BIG_WORD_CHAR)
+
+
+def sentence_head(clean: str, start: int) -> int:
+    """Return where the sentence holding ``start`` opens.
+
+    Python cannot search backward, so the window behind ``start`` doubles
+    until it holds the previous sentence end. Scanning from the paragraph top
+    would cost a pass over everything above for every hit.
+    """
+    window = 256
+    while True:
+        low = max(start - window, 0)
+        ends = [
+            found.end()
+            for found in SENTENCE_HEAD.finditer(clean, low, start + 1)
+            if found.end() <= start
+        ]
+        if ends or low == 0:
+            head = ends[-1] if ends else 0
+            break
+        window *= 2
+    while head < start and clean[head].isspace():
+        head += 1
+    return head
+
+
+def sentence_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
+    """Grow an offset range to the sentence around it, vim ``is``.
+
+    A sentence runs across line breaks but never out of its paragraph.
+    """
+    head = sentence_head(clean, start)
+    found = SENTENCE_TAIL.search(clean, max(start, end - 1))
+    if found is None:
+        tail = len(clean)
+    else:
+        tail = found.start() if found.group(0) == "\n\n" else found.end()
+    while tail > head and clean[tail - 1].isspace():
+        tail -= 1
+    return head, tail
+
+
+TEXT_OBJECTS = {
+    WORD_OBJECT: word_bounds,
+    BIG_WORD_OBJECT: big_word_bounds,
+    SENTENCE_OBJECT: sentence_bounds,
+}
 
 
 def sentence_start_pattern(pattern: str) -> str | None:
@@ -543,8 +632,14 @@ def block_matches(clean: str, locator: str, bounds, flags: re.RegexFlag) -> list
     """Expand every locator hit to its surrounding block, without repeats."""
     seen: set[tuple[int, int]] = set()
     matches = []
+    last = (0, -1)
     for found in regex_matches_latest(clean, locator, flags=flags):
-        span = bounds(clean, *selection_span(found))
+        hit = selection_span(found)
+        # Hits arrive newest first, so one inside the block just found grows
+        # to that same block. Skipping it saves a scan of the block per hit.
+        if last[0] <= hit[0] and hit[1] <= last[1]:
+            continue
+        span = last = bounds(clean, *hit)
         if span in seen:
             continue
         seen.add(span)
@@ -585,6 +680,10 @@ def clean_matches_latest(clean: str, pattern: str) -> list[Match]:
     line_start = line_suffix_start(pattern)
     if line_start is not None:
         return block_matches(clean, line_start, line_bounds, flags)
+
+    text_object = text_object_start(pattern)
+    if text_object is not None:
+        return block_matches(clean, *text_object, flags)
 
     landmark_tail = landmark_line_tail_pattern(pattern)
     if landmark_tail is not None:
@@ -938,8 +1037,11 @@ def native_selection_start_pattern(
     query, _ = query_options(query)
     if url_suffix_locator(query) is not None:
         return None
-    if paragraph_suffix_start(query) is not None:
-        # The paragraph opens above the locator, so the search has to start
+    if (
+        paragraph_suffix_start(query) is not None
+        or text_object_start(query) is not None
+    ):
+        # The block opens before the locator, so the search has to start
         # from the text itself. Its first word is the only anchor there is.
         first = re.search(r"\S+", match.text) if match is not None else None
         return prose_friendly_pattern(ere_literal(first.group(0))) if first else None
@@ -1028,7 +1130,12 @@ def native_search_occurrence(text: str, query: str, match: Match) -> int | None:
 
 def block_highlight_query(query: str) -> str | None:
     """Rewrite a block suffix as its bare locator for the native search."""
-    locator = line_suffix_start(query) or paragraph_suffix_start(query)
+    text_object = text_object_start(query)
+    locator = (
+        line_suffix_start(query)
+        or paragraph_suffix_start(query)
+        or (text_object[0] if text_object else None)
+    )
     return None if locator is None else "^" + locator
 
 

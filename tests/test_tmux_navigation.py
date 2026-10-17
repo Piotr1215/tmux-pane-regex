@@ -65,6 +65,9 @@ class TmuxNavigationTests(unittest.TestCase):
             "print('call (one) and (two words) done')\n"
             "print('say [first item] and [x] or [last]')\n"
             "print('')\n"
+            "print('Alpha leads. A quokka sentence')\n"
+            "print('ends here! Omega trails.')\n"
+            "print('')\n"
             "print('docs at https://example.com/docs.')\n"
             "print('see (https://example.com/docs/a_(b)) now')\n"
             "print('long https://example.com/' + 'segment/' * 14 + 'end here')\n"
@@ -302,6 +305,11 @@ class TmuxNavigationTests(unittest.TestCase):
             r"^Wrapped\L": None,
             r"^para two\P": "para one\npara two",
             r"^para\P": "para one\npara two",
+            r"^VALUE\iw": "tokenVALUE",
+            r"^option\iw": "option",
+            r"^tail\iW": "-tail",
+            r"^quokka\is": "A quokka sentence\nends here!",
+            r"^para two\ip": "para one\npara two",
         }
         for mode in ("vi", "emacs"):
             self.tmux("send-keys", "-X", "-t", self.pane, "cancel")

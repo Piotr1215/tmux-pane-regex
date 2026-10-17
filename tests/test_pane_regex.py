@@ -565,6 +565,79 @@ class PaneRegexMatchTests(unittest.TestCase):
         self.assertEqual(lower.text, "alpha one\nalpha two")
         self.assertEqual(upper.text, lower.text)
 
+    def test_word_objects_grow_the_locator_to_its_word(self):
+        text = "Broadcast tracking: /tmp/claude_broadcast_tmux-pane-main_1_1.json\n"
+        cases = {
+            r"^claude_\iW": "/tmp/claude_broadcast_tmux-pane-main_1_1.json",
+            r"^claude_\iw": "claude_broadcast_tmux",
+            r"^\.json\iW": "/tmp/claude_broadcast_tmux-pane-main_1_1.json",
+            r"^\Cclaude_\iw": "claude_broadcast_tmux",
+        }
+        for query, expected in cases.items():
+            with self.subTest(query=query):
+                self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
+
+    def test_word_object_reports_each_word_once(self):
+        matches = self.mod.find_matches_latest("banana split\n", r"^an\iw")
+
+        self.assertEqual([match.text for match in matches], ["banana"])
+
+    def test_sentence_object_selects_the_sentence_holding_the_locator(self):
+        text = "First one. Edit pane_regex.py now, then\nrun the tests! Last one.\n"
+        cases = {
+            r"^regex\is": "Edit pane_regex.py now, then\nrun the tests!",
+            r"^tests\is": "Edit pane_regex.py now, then\nrun the tests!",
+            r"^First\is": "First one.",
+            r"^Last\is": "Last one.",
+        }
+        for query, expected in cases.items():
+            with self.subTest(query=query):
+                self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
+
+    def test_sentence_object_ends_at_closers_and_blank_lines(self):
+        text = 'He said "stop." Then left\n\nno ending here\n\nnext\n'
+        cases = {
+            r"^said\is": 'He said "stop."',
+            r"^Then\is": "Then left",
+            r"^ending\is": "no ending here",
+        }
+        for query, expected in cases.items():
+            with self.subTest(query=query):
+                self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
+
+    def test_sentence_object_reaches_back_past_a_long_sentence(self):
+        sentence = "Opening " + "word " * 120 + "needle closes."
+
+        match = self.mod.find_latest_match(
+            f"Before. {sentence} After.\n", r"^needle\is"
+        )
+
+        self.assertEqual(match.text, sentence)
+
+    def test_inner_paragraph_reads_the_same_as_the_paragraph_suffix(self):
+        text = "alpha one\nalpha two\n\nbeta one\n"
+
+        inner = self.mod.find_latest_match(text, r"^alpha\ip")
+        plain = self.mod.find_latest_match(text, r"^alpha\p")
+
+        self.assertEqual(inner, plain)
+
+    def test_text_objects_search_from_the_first_word_they_select(self):
+        cases = {
+            r"^regex\iW": ("pane_regex.py", r"pane_regex\.py"),
+            r"^run\is": ("Edit it, then\nrun the tests!", "Edit"),
+        }
+        for query, (text, expected) in cases.items():
+            with self.subTest(query=query):
+                match = self.mod.Match(text, 1, 1 + text.count("\n"))
+
+                pattern = self.mod.native_selection_start_pattern(query, match)
+
+                self.assertEqual(pattern, expected)
+
+    def test_text_objects_highlight_their_locator(self):
+        self.assertEqual(self.mod.native_highlight_pattern(r"^claude_\iW"), "claude_")
+
     def test_url_suffix_visits_every_url_newest_first(self):
         text = "old https://example.com/old\nsee https://example.com/new now\n"
 
@@ -612,7 +685,10 @@ class PaneRegexMatchTests(unittest.TestCase):
             r"\ze",
             "$$",
             r"\l",
-            r"\p",
+            r"\ip",
+            r"\is",
+            r"\iw",
+            r"\iW",
             r"\ss",
             r"\u",
             r"\C",
