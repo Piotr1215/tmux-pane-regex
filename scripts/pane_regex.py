@@ -33,13 +33,14 @@ PARAGRAPH_OBJECT = r"\ip"
 SENTENCE_OBJECT = r"\is"
 WORD_OBJECT = r"\iw"
 BIG_WORD_OBJECT = r"\iW"
-WORD_CHAR = re.compile(r"\w")
-BIG_WORD_CHAR = re.compile(r"\S")
+# vim's word classes. The character under the cursor picks the run, so a
+# punctuation run or a blank run is a word of its own, as in ``viw``.
+WORD_CLASSES = (re.compile(r"\w"), re.compile(r"[^\w\s]"), re.compile(r"[^\S\n]"))
+BIG_WORD_CLASSES = (re.compile(r"\S"), re.compile(r"[^\S\n]"))
 # A sentence ends at a terminator and any closing quotes or brackets before
 # whitespace, so the dot in ``pane_regex.py`` ends nothing. A blank line ends
 # one too.
-SENTENCE_HEAD = re.compile(r"[.!?][\"')\]’”]*(?=\s)|\n\n")
-SENTENCE_TAIL = re.compile(r"[.!?][\"')\]’”]*(?=\s|\Z)|\n\n")
+SENTENCE_END = re.compile(r"[.!?][\"')\]’”]*(?=\s|\Z)|\n\n")
 MOTION_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\([1-9]\d*)?([ft])(.+)$", re.DOTALL)
 COUNT_SUFFIX = re.compile(r"(?<!\\)((?:\\\\)*)\\([1-9]\d*)([ft]?)$")
 LANDMARK_HOP = re.compile(r"(?<!\\)\.[*+]\??")
@@ -59,7 +60,7 @@ LEGEND = "\n".join(
     (
         r"Up/Down older/newer  Enter/Tab paste  Ctrl-Y copy  Esc cancel  \C case",
         r".*word\2 2nd word  \2t before  \3f, 3rd comma  \zs \ze trim  \u url",
-        r"$$ line end  \l line  \ip para  \is \ss sentence  \iw word  \iW WORD",
+        r"$$ line end  \l line  \p \ip para  \is \ss sentence  \iw word  \iW WORD",
     )
 )
 
@@ -317,6 +318,10 @@ def block_start_pattern(pattern: str, *forms: str) -> str | None:
     for form in forms:
         if pattern.endswith(form):
             start = pattern[1 : -len(form)]
+            # An odd run of backslashes escapes the suffix's own, so
+            # ``^foo\\iw`` stays the regex for the text ``foo\iw``.
+            if (len(start) - len(start.rstrip("\\"))) % 2:
+                return None
             return start or None
     return None
 
@@ -447,10 +452,18 @@ def line_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
     return top, len(clean) if tail < 0 else tail
 
 
-def grow_bounds(
-    clean: str, start: int, end: int, char: re.Pattern[str]
+def run_bounds(
+    clean: str, start: int, end: int, classes: tuple[re.Pattern[str], ...]
 ) -> tuple[int, int]:
-    """Grow an offset range while the characters on either side are ``char``."""
+    """Return the run of one character class around the first hit character.
+
+    The locator stands in for vim's cursor, so ``^-\\iw`` selects the ``-``
+    under it rather than the words on either side.
+    """
+    char = next((char for char in classes if char.match(clean, start)), None)
+    if char is None:
+        return start, end
+    end = start + 1
     while start > 0 and char.match(clean, start - 1):
         start -= 1
     while end < len(clean) and char.match(clean, end):
@@ -459,13 +472,13 @@ def grow_bounds(
 
 
 def word_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
-    """Grow an offset range to the vim word around it, letters, digits and ``_``."""
-    return grow_bounds(clean, start, end, WORD_CHAR)
+    """Return the vim word under the hit: letters, digits and ``_``."""
+    return run_bounds(clean, start, end, WORD_CLASSES)
 
 
 def big_word_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
-    """Grow an offset range to the vim WORD around it, all but whitespace."""
-    return grow_bounds(clean, start, end, BIG_WORD_CHAR)
+    """Return the vim WORD under the hit: everything but whitespace."""
+    return run_bounds(clean, start, end, BIG_WORD_CLASSES)
 
 
 def sentence_head(clean: str, start: int) -> int:
@@ -480,7 +493,9 @@ def sentence_head(clean: str, start: int) -> int:
         low = max(start - window, 0)
         ends = [
             found.end()
-            for found in SENTENCE_HEAD.finditer(clean, low, start + 1)
+            # The window ends one past ``start``, so a terminator right before
+            # the locator counts only when whitespace follows it.
+            for found in SENTENCE_END.finditer(clean, low, start + 1)
             if found.end() <= start
         ]
         if ends or low == 0:
@@ -498,11 +513,13 @@ def sentence_bounds(clean: str, start: int, end: int) -> tuple[int, int]:
     A sentence runs across line breaks but never out of its paragraph.
     """
     head = sentence_head(clean, start)
-    found = SENTENCE_TAIL.search(clean, max(start, end - 1))
-    if found is None:
-        tail = len(clean)
-    else:
-        tail = found.start() if found.group(0) == "\n\n" else found.end()
+    tail = len(clean)
+    # The first ending from the head that covers the hit, so any hit inside
+    # one sentence grows to that same sentence.
+    for found in SENTENCE_END.finditer(clean, head):
+        if found.end() >= end:
+            tail = found.start() if found.group(0) == "\n\n" else found.end()
+            break
     while tail > head and clean[tail - 1].isspace():
         tail -= 1
     return head, tail
@@ -643,11 +660,14 @@ def block_matches(clean: str, locator: str, bounds, flags: re.RegexFlag) -> list
     last = (0, -1)
     for found in regex_matches_latest(clean, locator, flags=flags):
         hit = selection_span(found)
-        # Hits arrive newest first, so one inside the block just found grows
-        # to that same block. Skipping it saves a scan of the block per hit.
+        # Hits arrive newest first. One inside the last block grows to that
+        # same block when the block is one unit, so skipping it saves a scan
+        # per hit. A hit that crossed units grew to several, and an older hit
+        # inside them can still have a block of its own.
         if last[0] <= hit[0] and hit[1] <= last[1]:
             continue
-        span = last = bounds(clean, *hit)
+        span = bounds(clean, *hit)
+        last = span if bounds(clean, span[0], span[0] + 1) == span else (0, -1)
         if span in seen:
             continue
         seen.add(span)

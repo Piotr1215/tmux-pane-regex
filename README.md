@@ -58,8 +58,8 @@ output:
 | `^word\p` | The whole paragraph holding `word`, vim `vip` |
 | `^word\ip` | Same as `\p`, vim `vip` |
 | `^word\is` | The whole sentence holding `word`, vim `vis` |
-| `^word\iw` | The word holding `word`, vim `viw` |
-| `^word\iW` | The run of non-blank text holding `word`, vim `viW` |
+| `^word\iw` | The word under the start of `word`, vim `viw` |
+| `^word\iW` | The run of non-blank text under the start of `word`, vim `viW` |
 | `^\u` | The newest URL, Up for older ones |
 | `^word\u` | The newest URL holding `word` |
 | `^price\$` | A literal final dollar sign |
@@ -78,7 +78,7 @@ and the `●` and `⎿` gutter an agent CLI draws down the left of its own outpu
 A paragraph is reported once however many of its lines hold the locator.
 Either case works, `\L` and `\P` read the same as the lowercase pair.
 
-`\iw`, `\iW`, `\is` and `\ip` are vim's inner text objects, so the locator only has to land somewhere inside what you want. `^claude_\iW` selects all of `/tmp/claude_broadcast_main_1.json`, while `^claude_\iw` stops at the first character that is not a letter, digit, or `_`. `\is` runs back to the previous sentence end and on through the next `.`, `!`, or `?` before whitespace, so the dot in `pane_regex.py` ends nothing, and a blank line ends a sentence too. `\ip` reads the same as `\p`. Case picks word or WORD, as in vim. A word or sentence is reported once however many hits it holds.
+`\iw`, `\iW`, `\is` and `\ip` are vim's inner text objects, so the locator only has to land somewhere inside what you want. `^claude_\iW` selects all of `/tmp/claude_broadcast_main_1.json`, while `^claude_\iw` stops at the first character that is not a letter, digit, or `_`. The locator stands in for vim's cursor, so the word is the one under its first character: `^-\iw` selects just the `-`. `\is` runs back to the previous sentence end and on through the next `.`, `!`, or `?` before whitespace, so the dot in `pane_regex.py` ends nothing, and a blank line ends a sentence too. `\ip` reads the same as `\p`. Case picks word or WORD, as in vim. A word or sentence is reported once however many hits it holds.
 
 `\zs` and `\ze` move the selection boundaries the way they do in vim. The text
 outside them still has to match, it is just not selected. The context before

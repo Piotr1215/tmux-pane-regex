@@ -577,6 +577,33 @@ class PaneRegexMatchTests(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(self.mod.find_latest_match(text, query).text, expected)
 
+    def test_word_objects_take_the_run_under_the_first_hit_character(self):
+        cases = {
+            r"^-\iw": "-",
+            r"^bar\iw": "bar",
+            r"^\.\zsjson\iw": "json",
+            r"^-\iW": "foo-bar.json",
+        }
+        for query, expected in cases.items():
+            with self.subTest(query=query):
+                match = self.mod.find_latest_match("see foo-bar.json\n", query)
+
+                self.assertEqual(match.text, expected)
+
+    def test_block_suffixes_keep_an_escaped_backslash_literal(self):
+        for suffix in ("iw", "iW", "is", "ip", "p", "l"):
+            with self.subTest(suffix=suffix):
+                match = self.mod.find_latest_match(
+                    f"path foo\\{suffix} here\n", rf"^foo\\{suffix}"
+                )
+
+                self.assertEqual(match.text, f"foo\\{suffix}")
+
+    def test_block_skip_keeps_an_older_block_inside_a_wider_one(self):
+        matches = self.mod.find_matches_latest("x x\n\ny\n", r"^x(\n\ny)?\p")
+
+        self.assertEqual([match.text for match in matches], ["x x\n\ny", "x x"])
+
     def test_word_object_reports_each_word_once(self):
         matches = self.mod.find_matches_latest("banana split\n", r"^an\iw")
 
@@ -685,6 +712,7 @@ class PaneRegexMatchTests(unittest.TestCase):
             r"\ze",
             "$$",
             r"\l",
+            r"\p",
             r"\ip",
             r"\is",
             r"\iw",

@@ -77,7 +77,7 @@ The documented selector forms are public behavior:
   committed `^word$` line form is deduplicated the same way, while the
   unfinished `^word` keeps one stop per hit so arrows can walk them.
   Both accept either case.
-- `^word\iw`, `^word\iW`, `^word\is` and `^word\ip` are vim's inner text objects: the `\w` run, the non-whitespace run, the sentence, and the paragraph holding the locator, each reported once. A sentence ends at `.`, `!`, or `?` and any closing quotes or brackets before whitespace, or at a blank line. `\ip` is `\p`. Case picks word or WORD, so these suffixes are case-sensitive.
+- `^word\iw`, `^word\iW`, `^word\is` and `^word\ip` are vim's inner text objects: the word and the WORD under the locator's first character, as under vim's cursor, then the sentence and the paragraph holding the locator, each reported once. A sentence ends at `.`, `!`, or `?` and any closing quotes or brackets before whitespace, or at a blank line. `\ip` is `\p`. Case picks word or WORD, so these suffixes are case-sensitive. A suffix after an escaped backslash, as in `^foo\\iw`, stays literal regex.
 - `^start\3f,` selects through the third `,` and `^start\3t,` stops before it,
   vim `v3f,` and `v3t,`. The count defaults to one. The target is the literal
   rest of the query, one character or a word, so `^start\2fout` reaches the
