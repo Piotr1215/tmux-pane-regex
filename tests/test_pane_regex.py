@@ -1168,6 +1168,30 @@ class PaneRegexPluginTests(unittest.TestCase):
 
         start.assert_called_once_with(0, pane="%7")
 
+    def test_focused_pane_comes_from_the_newest_client_row(self):
+        # A launcher that inherited another pane's TMUX_PANE gets that pane back
+        # from any tmux command that resolves a current target, which this fake
+        # answers with %51. Only the list-clients row names the client's pane.
+        rows = "".join(
+            f"{row}\n"
+            for row in (
+                "/dev/pts/3|101|1000|%2",
+                "/dev/pts/9|102|2000|%8",
+                "/dev/pts/4|103|1500|%4",
+            )
+        )
+
+        def fake_tmux(*args, **kwargs):
+            if args[0] == "list-clients":
+                return self.mod.subprocess.CompletedProcess(args, 0, stdout=rows)
+            return self.mod.subprocess.CompletedProcess(args, 0, stdout="%51\n")
+
+        with (
+            mock.patch.object(self.mod, "run", side_effect=FileNotFoundError),
+            mock.patch.object(self.mod, "tmux", side_effect=fake_tmux),
+        ):
+            self.assertEqual(self.mod.active_tmux_target(), ("/dev/pts/9", "%8"))
+
 
 if __name__ == "__main__":
     unittest.main()

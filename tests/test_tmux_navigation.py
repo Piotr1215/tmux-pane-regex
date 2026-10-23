@@ -659,3 +659,102 @@ class TmuxNavigationTests(unittest.TestCase):
                 return
             time.sleep(0.02)
         self.fail(f"popup did not select {text!r}")
+
+
+@unittest.skipUnless(shutil.which("tmux"), "tmux is required")
+class ActiveTargetTests(unittest.TestCase):
+    """Resolve the focused pane from a launcher that inherited another pane."""
+
+    def setUp(self):
+        self.mod = load_module()
+        self.tmp = tempfile.TemporaryDirectory(prefix="pane-regex-expand-test-")
+        self.addCleanup(self.tmp.cleanup)
+        self.socket = str(Path(self.tmp.name) / "tmux.sock")
+        # The agent pane lives in a session the attached client does not show.
+        self.background = self.tmux(
+            "-f",
+            "/dev/null",
+            "new-session",
+            "-d",
+            "-s",
+            "agent",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "cat",
+        ).stdout.strip()
+        self.addCleanup(self.tmux, "kill-server", check=False)
+        self.focused = self.tmux(
+            "new-session", "-d", "-s", "focus", "-P", "-F", "#{pane_id}", "cat"
+        ).stdout.strip()
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        env = dict(os.environ, TERM="xterm-256color")
+        env.pop("TMUX", None)
+        env.pop("TMUX_PANE", None)
+        client = subprocess.Popen(
+            ["tmux", "-S", self.socket, "attach-session", "-t", "focus"],
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env=env,
+        )
+        os.close(slave)
+        self.addCleanup(client.wait, timeout=3)
+        self.addCleanup(client.terminate)
+        stop = threading.Event()
+        reader = threading.Thread(target=self.drain, args=(master, stop), daemon=True)
+        reader.start()
+        self.addCleanup(reader.join, timeout=1)
+        self.addCleanup(stop.set)
+        deadline = time.monotonic() + 5
+        while not self.tmux("list-clients", "-F", "#{client_name}").stdout.strip():
+            if time.monotonic() > deadline:
+                self.fail("tmux client did not attach")
+            time.sleep(0.02)
+        # What AutoKey handed every launcher after a restart from an agent pane.
+        server_pid = self.tmux("display-message", "-p", "#{pid}").stdout.strip()
+        self.leaked = dict(
+            os.environ,
+            TMUX=f"{self.socket},{server_pid},0",
+            TMUX_PANE=self.background,
+        )
+
+    def tmux(self, *args, check=True, env=None, **kwargs):
+        kwargs.setdefault("capture_output", True)
+        return subprocess.run(
+            ["tmux", "-S", self.socket, *args],
+            text=True,
+            check=check,
+            timeout=5,
+            env=env,
+            **kwargs,
+        )
+
+    @staticmethod
+    def drain(master, stop):
+        while not stop.is_set():
+            if select.select([master], [], [], 0.05)[0]:
+                try:
+                    os.read(master, 65536)
+                except OSError:
+                    return
+
+    def test_inherited_tmux_pane_does_not_redirect_the_focused_pane(self):
+        client = self.tmux("list-clients", "-F", "#{client_name}").stdout.strip()
+        # The hazard is real: display-message resolves its pane from the
+        # caller's TMUX_PANE, even when told which client to ask about.
+        leaked_answer = self.tmux(
+            "display-message", "-p", "-c", client, "#{pane_id}", env=self.leaked
+        ).stdout.strip()
+        self.assertEqual(leaked_answer, self.background)
+
+        def leaked_tmux(*args, **kwargs):
+            return self.tmux(*args, env=self.leaked, **kwargs)
+
+        with (
+            mock.patch.object(self.mod, "tmux", leaked_tmux),
+            mock.patch.object(self.mod, "run", side_effect=FileNotFoundError),
+        ):
+            self.assertEqual(self.mod.active_tmux_target(), (client, self.focused))
