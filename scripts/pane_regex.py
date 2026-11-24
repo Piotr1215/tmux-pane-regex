@@ -892,7 +892,12 @@ def tmux(*args: str, check: bool = True, **kwargs) -> subprocess.CompletedProces
 
 
 def active_tmux_target() -> tuple[str, str]:
-    """Resolve the tmux client hosted by the focused X11 terminal."""
+    """Resolve the tmux client hosted by the focused X11 terminal.
+
+    The pane comes from the client's own list-clients row. display-message
+    resolves its pane from the caller's TMUX_PANE even with -c, so a launcher
+    that inherited another pane's environment would be sent to that pane.
+    """
     active_window = None
     try:
         active_window = int(
@@ -901,15 +906,23 @@ def active_tmux_target() -> tuple[str, str]:
     except (FileNotFoundError, ValueError, subprocess.CalledProcessError):
         pass
 
-    clients = tmux(
-        "list-clients", "-F", "#{client_name}|#{client_pid}", capture_output=True
-    ).stdout.splitlines()
+    clients = []
+    for row in tmux(
+        "list-clients",
+        "-F",
+        "#{client_name}|#{client_pid}|#{client_activity}|#{pane_id}",
+        capture_output=True,
+    ).stdout.splitlines():
+        fields = row.rsplit("|", 3)
+        if len(fields) == 4:
+            clients.append(fields)
     chosen = None
     if active_window is not None:
-        for row in clients:
-            client, _, pid = row.partition("|")
+        for client in clients:
             try:
-                environ = Path(f"/proc/{int(pid)}/environ").read_bytes().split(b"\0")
+                environ = (
+                    Path(f"/proc/{int(client[1])}/environ").read_bytes().split(b"\0")
+                )
                 value = next(
                     part[9:] for part in environ if part.startswith(b"WINDOWID=")
                 )
@@ -919,16 +932,16 @@ def active_tmux_target() -> tuple[str, str]:
             except (OSError, ValueError, StopIteration):
                 continue
     if chosen is None and clients:
-        chosen = clients[0].partition("|")[0]
-    if not chosen:
+        chosen = max(
+            clients, key=lambda client: int(client[2]) if client[2].isdigit() else 0
+        )
+    if chosen is None:
         raise RuntimeError("no attached tmux client")
 
-    pane = tmux(
-        "display-message", "-p", "-c", chosen, "#{pane_id}", capture_output=True
-    ).stdout.strip()
+    name, _, _, pane = chosen
     if re.fullmatch(r"%\d+", pane) is None:
         raise RuntimeError("focused tmux client has no active pane")
-    return chosen, pane
+    return name, pane
 
 
 def state_path(state: str) -> Path:
